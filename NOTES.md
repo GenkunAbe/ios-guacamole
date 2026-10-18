@@ -2,6 +2,18 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### 2026-10-19: workstation setup only (`invalidname` machine), no phone work
+- Repo verified complete: 229 commits, tree clean, HEAD `fdad0de` = `origin/main` (no partial clone, no LFS).
+- Pinned third-party sources downloaded into `research/` (gitignored), at the exact refs CI stages:
+  xnu-8796.141.3 `1b191cb5` (tag `xnu-8796.141.3`), libpthread-514.100.2 `a6c70ca0`,
+  hfs-627.100.6 `31d5ec23`, IOHIDFamily-1915.140.3 `2365347f`, BearSSL `7bea48e5`,
+  darwin-xnu-build `66390652` (build harness). Details + recreate commands: `research/DOWNLOAD-MANIFEST.md`.
+- Checked patch 0058 against the IOHIDFamily clone: 14 files byte-identical, the rest differ
+  only in kernel include paths/`SWEET` comments, `IOHIDEventService.h` is the project's minimal
+  replacement, `SweetHID.cpp`/`files.arm64`/`KernelConfigTables.cpp` are project files.
+- This machine has no GitHub token and no `gh` (artifact download needs auth), and no phone
+  work artifacts (`/run/media/dipa/...` does not exist here). No kernel build/boot attempted.
+
 ### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<
 
 **STATE at end of 2026-10-18 (evening):**

@@ -2,6 +2,38 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### 2026-10-19: guacamole port scaffold (OnePlus 7 Pro, SM8150), earlier workstation note below
+- New: `tools/devices.py` (per-board profile) + `tools/mkadt.py --device sweet|guacamole`;
+  `shim/boards/*.h` + `BOARD=guacamole shim/build.sh` (also `DTB=` and `UFS_BASE` moved there);
+  kernel patch **0082-sweet-guacamole-board.patch**: `MACHINE_CONFIG=GUACAMOLE`
+  (`makedefs/MakeInc.def`, `board_config.h`, `GUACAMOLE.h`, `MASTER.arm64.guacamole`),
+  per-board constants in `pexpert/pexpert/arm64/sweet_dev.h`, early-fb PA/geometry and
+  HID panel size parameterized, touch/USB stubs for guacamole (SWEET_DEV_TOUCH/USB 0),
+  `SweetFramebuffer` now letterboxes the iPhone X 1125x2436 canvas on a larger panel.
+  Staging scripts 0019/0020/0026 accept `GUACAMOLE`. Docs: `GUACAMOLE.md`, README section.
+- Verified locally: sweet ADT byte-identical before/after the mkadt refactor (4 fixed-seed
+  combos); sweet shim `out/Image` byte-identical (modulo the new BOARD banner line) and
+  guacamole shim builds; full replay (stage + 85 patches + 0082, CI order) applies cleanly
+  and the result equals the development tree.
+- Values: board facts from the LineageOS oneplus_sm8150 DTS (project dir 18821) and the
+  mainline guacamole DTS - splash `cont_splash_region` 0x9C000000 (36 MiB, mainline uses
+  the same range as a simple-framebuffer), panel S6E3HC2 1440x3120, touch **Samsung
+  S6SY761** @0x48 on GENI SE17 (`i2c@0xc80000`), keys on PM8150 GPIO6/7 (volume) + PON
+  power, PMIC SIDs (8150=0, 8150B=2, 8150L=4, 8009=0xa), touch rail `ldoa17`, usb0
+  a600000 + hsphy 88e2000 + QMP 88e8000 + QSCRATCH a6f8800. SoC-level: GIC 17a00000/
+  17a60000, CNTFRQ 19.2 MHz, VTIMER PPI3 = 19, UFS ufshc@1d84000 (HS-G4, 2 lanes),
+  RPMh RSC 18220000 / TCS 18220d00, MPIDR 0x0..0x700, PSCI smc, PS_HOLD c264000,
+  **IMEM 146bf000** (shim restart_reason 0x146bf65c - differs from sweet's 146aa000).
+  `--dram-size` added to mkadt (SKU: 0x180000000 = 8 GB, 0x280000000 = 12 GB; default
+  stays sweet's conservative 0xfcc00000, which fits every SKU).
+- Still unmapped: volume-key APID selection (keys poll power only), S6SY761 driver,
+  SM8150 GCC GDSC/CBCR offsets (USB kept off), RPMh command-DB address (touch rail
+  `ldoa17` vote), smb5 battery registers. All listed with next steps in `GUACAMOLE.md`.
+- Next for a real try: build `xnu.yml` with `machine_config=GUACAMOLE` (fork or the repo
+  owner), dump the guacamole stock DTB and audit the remaining *(verify)* values, then
+  `mkadt --device guacamole --highmem --dram-size <SKU>` + payload + `BOARD=guacamole`
+  shim and `fastboot boot` with `cpus=1`.
+
 ### 2026-10-19: workstation setup only (`invalidname` machine), no phone work
 - Repo verified complete: 229 commits, tree clean, HEAD `fdad0de` = `origin/main` (no partial clone, no LFS).
 - Pinned third-party sources downloaded into `research/` (gitignored), at the exact refs CI stages:

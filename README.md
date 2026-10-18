@@ -34,6 +34,17 @@ As of **2026-10-18** the phone boots to the **iOS home screen**. You can unlock 
 - **Slow boot:** about 4 minutes on the Apple logo.
 - **Security is off:** permissive code signing (AMFI) and sandbox policies, a stub AppleKeyStore, no data protection. Do not put anything personal on it.
 
+## Second board: OnePlus 7 Pro (SM8150)
+
+The port is parameterized for a second Qualcomm board, the OnePlus 7 Pro
+(`guacamole`, SM8150): `tools/mkadt.py --device guacamole`,
+`BOARD=guacamole shim/build.sh` and the `xnu` workflow's
+`machine_config=GUACAMOLE` feed the same ADT/shim/kernel pipeline with
+SM8150 numbers. This is a **scaffold, not a working port yet** — touch, USB
+and the SM8150 splash framebuffer still need mapping. See
+[`GUACAMOLE.md`](GUACAMOLE.md) for the hardware map, the bring-up sequence
+and the verification checklist.
+
 ## How it boots
 
 ```
@@ -149,7 +160,8 @@ The log contains crash reports with backtraces (`CRASH name ...`), IOKit traces 
 | `shim/` | Bare-metal boot shim (C + asm) packed as an Android boot.img v2 |
 | `xnu/patches/` | The XNU patch series (applied in order by CI), plus staging scripts for libpthread, HFS and BearSSL |
 | `.github/workflows/xnu.yml` | Kernel CI build |
-| `tools/mkadt.py` | Generates the Apple Device Tree from sweet's MMIO layout and the iPhone X identity |
+| `tools/mkadt.py` | Generates the Apple Device Tree from the board's MMIO layout and the iPhone X identity (`--device sweet\|guacamole`) |
+| `tools/devices.py` | Per-board hardware profiles (memory, GIC, CPUs, framebuffer, UFS) for the ADT/shim |
 | `tools/mkpayload.py` | Packs kernel + ADT + boot-args into the shim payload |
 | `tools/mkiosroot.sh` | Builds the HFS+ iOS root from the IPSW images |
 | `tools/sweet-root-tweaks.py` | Bring-up changes to the root (Setup skip, activation, daemons) |

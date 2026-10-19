@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..60a3830 100644
+index b6c1a41..d744160 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -313,7 +313,19 @@ index b6c1a41..60a3830 100644
  #define QUSB2_SIZE              0x00000400
  
  static uint32_t
-@@ -127,11 +144,22 @@ sweet_usb_probe(void)
+@@ -82,6 +99,11 @@ sweet_usb_probe(void)
+ 
+ 	/* sweetusb=0 off, 1 (default) report state only, 2 also start the USB device */
+ 	PE_parse_boot_argn("sweetusb", &enabled, sizeof(enabled));
++
++	/* What the previous (possibly EDL'd) boot left in IMEM. */
++	uint32_t prev_mark = usb_mark_read();
++	printf("SWEET USB: previous run marker 0x%08x (%s)\n", prev_mark, usb_mark_name(prev_mark));
++	usb_mark(0x1);
+ 	if (!enabled) {
+ 		return;
+ 	}
+@@ -127,11 +149,22 @@ sweet_usb_probe(void)
  	if (phy == 0) {
  		return;
  	}
@@ -341,7 +353,7 @@ index b6c1a41..60a3830 100644
  }
  
  /*
-@@ -161,19 +189,6 @@ sweet_usb_probe(void)
+@@ -161,23 +194,67 @@ sweet_usb_probe(void)
  #define DEPCMDPAR0(n)   (0xc808 + 0x10 * (n))
  #define DEPCMD(n)       (0xc80c + 0x10 * (n))
  
@@ -361,7 +373,68 @@ index b6c1a41..60a3830 100644
  #define DCTL_RUN_STOP   (1u << 31)
  #define DCTL_CSFTRST    (1u << 30)
  #define DSTS_DEVCTRLHLT (1u << 22)
-@@ -854,6 +869,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 
++/*
++ * Progress markers for the gadget bring-up survive a reset in IMEM, so a
++ * run that ends in EDL still leaves its last step readable on the next boot
++ * (the probe prints it; the shim can print it even earlier). Offset 0x8f0 is
++ * not used by any child of qcom,msm-imem@146bf000 in the live FDT.
++ */
++#define SWEET_USB_IMEM_PA    0x146bf000UL
++#define SWEET_USB_IMEM_MARK  0x8f0u
++#define SWEET_USB_MARK_GADGET   0x100u
++#define SWEET_USB_MARK_DALE     0x110u
++#define SWEET_USB_MARK_DALE_OK  0x111u
++#define SWEET_USB_MARK_TRB_OK   0x112u
++#define SWEET_USB_MARK_STEP4_OK 0x113u
++#define SWEET_USB_MARK_STEP5    0x120u
++#define SWEET_USB_MARK_STEP5_OK 0x121u
++#define SWEET_USB_MARK_RUN      0x130u
++#define SWEET_USB_MARK_RUN_OK   0x131u
++
++static vm_offset_t usb_imem;
++
++static uint32_t
++usb_mark_read(void)
++{
++	if (usb_imem == 0) {
++		usb_imem = ml_io_map(SWEET_USB_IMEM_PA, 0x1000);
++	}
++	return usb_imem ? *(volatile uint32_t *)(usb_imem + SWEET_USB_IMEM_MARK) : 0;
++}
++
++static void
++usb_mark(uint32_t v)
++{
++	(void)usb_mark_read();
++	if (usb_imem) {
++		*(volatile uint32_t *)(usb_imem + SWEET_USB_IMEM_MARK) = v;
++		__asm__ volatile ("dsb sy" ::: "memory");
++	}
++}
++
++static const char *
++usb_mark_name(uint32_t v)
++{
++	switch (v) {
++	case 0: return "none";
++	case SWEET_USB_MARK_GADGET: return "gadget entered";
++	case SWEET_USB_MARK_DALE: return "before DALEPENA";
++	case SWEET_USB_MARK_DALE_OK: return "DALEPENA written";
++	case SWEET_USB_MARK_TRB_OK: return "ep0 TRB written (DEPCMD next)";
++	case SWEET_USB_MARK_STEP4_OK: return "step 4 done";
++	case SWEET_USB_MARK_STEP5: return "before QSCRATCH";
++	case SWEET_USB_MARK_STEP5_OK: return "QSCRATCH done";
++	case SWEET_USB_MARK_RUN: return "before RUN_STOP";
++	case SWEET_USB_MARK_RUN_OK: return "RUN_STOP written";
++	default: return "unknown";
++	}
++}
++
+ #define DEPCMD_SETEPCONFIG      1
+ #define DEPCMD_SETTRANSFRESOURCE 2
+ #define DEPCMD_SETSTALL         4
+@@ -854,6 +931,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	thread_t thread;
  
  	ud.dwc = dwc;
@@ -369,7 +442,7 @@ index b6c1a41..60a3830 100644
  	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
  	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
  		printf("SWEET USB: no DMA memory\n");
-@@ -867,6 +883,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -867,6 +945,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	ud_if_create();
  
  	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
@@ -377,7 +450,7 @@ index b6c1a41..60a3830 100644
  	dwc_wr(DCTL, DCTL_CSFTRST);
  	int i;
  	for (i = 0; i < 500 && (dwc_rd(DCTL) & DCTL_CSFTRST); i++) {
-@@ -878,6 +895,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -878,6 +957,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		return;
  	}
  
@@ -385,7 +458,7 @@ index b6c1a41..60a3830 100644
  	dwc_wr(GEVNTADRLO, (uint32_t)(ud.dma_pa + UD_EVT));
  	dwc_wr(GEVNTADRHI, (uint32_t)((ud.dma_pa + UD_EVT) >> 32));
  	dwc_wr(GEVNTSIZ, (1u << 31) | UD_EVT_SIZE);     /* interrupt masked: polled */
-@@ -890,6 +908,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -890,6 +970,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	/* Events: disconnect, USB reset, connect done */
  	dwc_wr(DEVTEN, 0x7);
  
@@ -393,7 +466,7 @@ index b6c1a41..60a3830 100644
  	/* Endpoint 0 OUT/IN: start config, control type, max packet 512 until connect done. */
  	if (ud_epcmd(0, DEPCMD_DEPSTARTCFG, 0, 0, 0) ||
  	    ud_epcmd(0, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (0u << 25), 0) ||
-@@ -899,21 +918,45 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -899,22 +980,52 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		printf("SWEET USB: endpoint 0 setup failed\n");
  		return;
  	}
@@ -405,9 +478,12 @@ index b6c1a41..60a3830 100644
 +		return;
 +	}
 +	printf("SWEET USB:   - DALEPENA write\n");
++	usb_mark(SWEET_USB_MARK_DALE);
  	dwc_wr(DALEPENA, 0x3);
++	usb_mark(SWEET_USB_MARK_DALE_OK);
 +	printf("SWEET USB:   - ep0 setup TRB\n");
  	ud_start_setup();
++	usb_mark(SWEET_USB_MARK_STEP4_OK);
 +	printf("SWEET USB:   - step 4 done\n");
  
 +	int vbus = 1;
@@ -417,6 +493,7 @@ index b6c1a41..60a3830 100644
 +		return;
 +	}
 +	printf("SWEET USB: gadget step 5: QSCRATCH%s\n", vbus ? "" : " (read only, sweetvbus=0)");
++	usb_mark(SWEET_USB_MARK_STEP5);
  	vm_offset_t qs = ml_io_map(QSCRATCH_PA, 0x100);
  	if (qs != 0) {
  		uint32_t hs = usb_rd(qs, QSCRATCH_HS_PHY_CTRL), ss = usb_rd(qs, QSCRATCH_SS_PHY_CTRL);
@@ -441,10 +518,13 @@ index b6c1a41..60a3830 100644
 +		return;
 +	}
 +	printf("SWEET USB: gadget step 6: RUN_STOP\n");
++	usb_mark(SWEET_USB_MARK_RUN);
  	dwc_wr(DCTL, dwc_rd(DCTL) | DCTL_RUN_STOP);
++	usb_mark(SWEET_USB_MARK_RUN_OK);
  	for (i = 0; i < 500 && (dwc_rd(DSTS) & DSTS_DEVCTRLHLT); i++) {
  		delay(1000);
-@@ -928,4 +971,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 	}
+@@ -928,4 +1039,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		thread_deallocate(thread);
  	}
  }

@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..3376d0c 100644
+index b6c1a41..da94a1b 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -539,7 +539,7 @@ index b6c1a41..3376d0c 100644
  	/* Endpoint 0 OUT/IN: start config, control type, max packet 512 until connect done. */
  	if (ud_epcmd(0, DEPCMD_DEPSTARTCFG, 0, 0, 0) ||
  	    ud_epcmd(0, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (0u << 25), 0) ||
-@@ -899,26 +1015,78 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -899,26 +1015,94 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		printf("SWEET USB: endpoint 0 setup failed\n");
  		return;
  	}
@@ -601,6 +601,22 @@ index b6c1a41..3376d0c 100644
 +			__asm__ volatile ("dsb sy" ::: "memory");
 +			printf("SWEET USB:   - SS_PHY_CTRL now 0x%08x\n", usb_rd(qs, QSCRATCH_SS_PHY_CTRL));
 +		}
++	}
++	if (vbus == 3) {
++		/* PHY-side VBUS override instead of the wrapper write (femto v2:
++		 * COMMON1 bit4 VBUSVLDEXTSEL0, CTRL1 bit0 VBUSVLDEXT0). Byte
++		 * accesses: the PHY window mirrors one byte across the word. */
++		vm_offset_t phy2 = ml_io_map(QUSB2_PA, QUSB2_SIZE);
++		if (phy2 != 0) {
++			uint8_t c1 = *(volatile uint8_t *)(phy2 + 0x58);
++			uint8_t c2 = *(volatile uint8_t *)(phy2 + 0x60);
++			printf("SWEET USB:   - PHY VBUS override (COMMON1 0x%02x CTRL1 0x%02x)\n", c1, c2);
++			*(volatile uint8_t *)(phy2 + 0x58) = c1 | (1u << 4);
++			*(volatile uint8_t *)(phy2 + 0x60) = c2 | 1u;
++			__asm__ volatile ("dsb sy" ::: "memory");
++			printf("SWEET USB:   - PHY now COMMON1 0x%02x CTRL1 0x%02x\n",
++			    *(volatile uint8_t *)(phy2 + 0x58), *(volatile uint8_t *)(phy2 + 0x60));
++		}
  	}
  
 +	if (maxstep < 6) {
@@ -624,7 +640,7 @@ index b6c1a41..3376d0c 100644
  	if (kernel_thread_start(ud_thread, NULL, &thread) == KERN_SUCCESS) {
  		thread_deallocate(thread);
  	}
-@@ -928,4 +1096,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -928,4 +1112,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		thread_deallocate(thread);
  	}
  }
@@ -1097,10 +1113,10 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..83f940d
+index 0000000..410c7ec
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,171 @@
 +#ifndef _PEXPERT_ARM64_SWEET_DEV_H
 +#define _PEXPERT_ARM64_SWEET_DEV_H
 +
@@ -1174,10 +1190,12 @@ index 0000000..83f940d
 + * issued before the host has reset the bus, so arm ep0 on USB reset /
 + * XferNotReady instead of at bring-up. */
 +#define SWEET_DEV_USB_ARM_ON_EVENT 1
-+/* QSCRATCH VBUS override: 0 none, 1 HS only, 2 HS + SS. The SS PHY on this
-+ * board is the USB3/DP combo (QMP) that ABL drives for the display; writing
-+ * SS_PHY_CTRL wedges the bus, so only override the HS side by default. */
-+#define SWEET_DEV_USB_VBUS_DEFAULT 1
++/* QSCRATCH VBUS override: 0 none, 1 HS wrapper write, 2 HS+SS wrapper writes,
++ * 3 PHY-side override (femto v2 COMMON1/CTRL1). The wrapper at 0xa6f8800 is
++ * readable but any write to it wedges the bus in this state, and the SS PHY
++ * is the USB3/DP combo ABL drives for the display, so guacamole uses the
++ * PHY-side override. */
++#define SWEET_DEV_USB_VBUS_DEFAULT 3
 +#define SWEET_DEV_TOUCH_SE_PA   0x00c80000u
 +#define SWEET_DEV_TOUCH_GCC_PA  0x00100000u
 +#define SWEET_DEV_TOUCH_NORTH_PA 0x03000000u     /* live tree pinctrl@03000000 */

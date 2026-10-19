@@ -270,10 +270,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..fb6b4aa
+index 0000000..5883370
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,736 @@
+@@ -0,0 +1,755 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -892,6 +892,10 @@ index 0000000..fb6b4aa
 +	*(volatile uint8_t *)(ts.gpio + TS_GPIO_CFG(104)) = 0xc5;
 +	ts_wait(1);
 +	printf("SWEET TOUCH: tlmm w8  c5 -> %#x\n", ts_rd(ts.gpio, TS_GPIO_CFG(104)));
++	/* UFS reset lives at 0xB6000 (mainline UFS_RESET) and must be configured
++	 * by the bootloader that just read the root filesystem. */
++	printf("SWEET TOUCH: tlmm ufsrst=%#x panelrst=%#x\n",
++	    ts_rd(ts.gpio, 0xb6000u), ts_rd(ts.gpio, TS_GPIO_CFG(6)));
 +
 +	/* Route the SE17 lines to the QUP function (device tree: gpio55/56 as
 +	 * qup17, 2 mA, no pulls) in case the bootloader left them as GPIO. */
@@ -958,6 +962,21 @@ index 0000000..fb6b4aa
 +	printf("SWEET TOUCH: state vreg=%d ack=%d id_err=%d id=%02x%02x%02x sense=%d events=%u\n",
 +	    ts.vreg_err, ts.ack_err, ts.id_err, ts.id[0], ts.id[1], ts.id[2],
 +	    ts.sense_err, ts.events);
++
++	/*
++	 * Write-effectiveness test, last on purpose: gpio6 is the panel reset
++	 * (live tree qcom,platform-reset-gpio). If the TLMM accepts writes the
++	 * panel resets and the screen goes dark right here; if the screen stays
++	 * lit, TLMM writes are being dropped and the GPIO path needs another
++	 * route. The console is lost when it works, so everything is printed
++	 * before this point.
++	 */
++	printf("SWEET TOUCH: panel reset test in 5 s; dark screen = TLMM writes work\n");
++	ts_wait(5000);
++	ts_gpio(6, 0, 0, 3, true, false);
++	ts_wait(200);
++	ts_gpio(6, 0, 0, 3, true, true);
++	printf("SWEET TOUCH: panel reset test done (screen still lit = writes dropped)\n");
 +
 +	unsigned errors = 0, ticks = 0;
 +	for (;;) {

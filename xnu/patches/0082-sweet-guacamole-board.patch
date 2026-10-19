@@ -1,12 +1,12 @@
 diff --git a/bsd/dev/sweet_keys.c b/bsd/dev/sweet_keys.c
-index a148608..006302e 100644
+index a148608..ad97533 100644
 --- a/bsd/dev/sweet_keys.c
 +++ b/bsd/dev/sweet_keys.c
 @@ -12,16 +12,17 @@
  #include <kern/sched_prim.h>
  #include <machine/machine_routines.h>
  #include <pexpert/pexpert.h>
-+#include <pexpert/pexpert/arm64/sweet_dev.h>
++#include <pexpert/arm64/sweet_dev.h>
  
  extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
  extern void sweet_hid_key(int key, int down);
@@ -105,14 +105,14 @@ index a148608..006302e 100644
  	if (kr == KERN_SUCCESS) {
  		thread_deallocate(thread);
 diff --git a/bsd/dev/sweet_rpmh.c b/bsd/dev/sweet_rpmh.c
-index 4da50d8..cafed58 100644
+index 4da50d8..5afe836 100644
 --- a/bsd/dev/sweet_rpmh.c
 +++ b/bsd/dev/sweet_rpmh.c
 @@ -9,15 +9,16 @@
  #include <sys/errno.h>
  #include <kern/clock.h>
  #include <machine/machine_routines.h>
-+#include <pexpert/pexpert/arm64/sweet_dev.h>
++#include <pexpert/arm64/sweet_dev.h>
  
  extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
  int sweet_rpmh_vreg_enable(const char *res, unsigned mv);
@@ -130,14 +130,14 @@ index 4da50d8..cafed58 100644
  #define RH_ACTIVE_N     2u       /* DT order: ACTIVE 2, SLEEP 3, WAKE 3 */
  #define RH_NORMAL_N     8u       /* hidden CONTROL TCS is not in this bank */
 diff --git a/bsd/dev/sweet_spmi.c b/bsd/dev/sweet_spmi.c
-index 1981490..8207311 100644
+index 1981490..c8ea9d5 100644
 --- a/bsd/dev/sweet_spmi.c
 +++ b/bsd/dev/sweet_spmi.c
 @@ -10,13 +10,14 @@
  #include <sys/systm.h>
  #include <machine/machine_routines.h>
  #include <IOKit/IOLocks.h>
-+#include <pexpert/pexpert/arm64/sweet_dev.h>
++#include <pexpert/arm64/sweet_dev.h>
  #include "sweet_spmi.h"
  
  extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
@@ -152,7 +152,7 @@ index 1981490..8207311 100644
  
  static vm_offset_t sp_core, sp_obs, sp_cfg;
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..aa97b88 100644
+index 03defe6..8beaa3d 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -5,7 +5,7 @@
@@ -168,7 +168,7 @@ index 03defe6..aa97b88 100644
  #include <kern/sched_prim.h>
  #include <machine/machine_routines.h>
  #include <pexpert/pexpert.h>
-+#include <pexpert/pexpert/arm64/sweet_dev.h>
++#include <pexpert/arm64/sweet_dev.h>
  
  extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
  /* Mach MIG declaration is not included by BSD's exported thread.h. */
@@ -206,7 +206,7 @@ index 03defe6..aa97b88 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..34e40a9 100644
+index b6c1a41..072d4dc 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,7 @@
@@ -222,7 +222,7 @@ index b6c1a41..34e40a9 100644
  #include <vm/pmap.h>
  #include <vm/vm_kern.h>
  #include <pexpert/pexpert.h>
-+#include <pexpert/pexpert/arm64/sweet_dev.h>
++#include <pexpert/arm64/sweet_dev.h>
  #include <kern/locks.h>
  #include <sys/kpi_mbuf.h>
  #include <sys/kpi_socket.h>
@@ -414,14 +414,14 @@ index a62416c..3f00a39 100644
  		fLogicalH = SWEET_FB_LOGICAL_H;
  	}
 diff --git a/iokit/Kernel/arm/hid/SweetHID.cpp b/iokit/Kernel/arm/hid/SweetHID.cpp
-index 27bc49d..f7fae97 100644
+index 27bc49d..746feb4 100644
 --- a/iokit/Kernel/arm/hid/SweetHID.cpp
 +++ b/iokit/Kernel/arm/hid/SweetHID.cpp
 @@ -21,6 +21,7 @@
  #include <IOKit/IOTimerEventSource.h>
  #include <libkern/c++/OSArray.h>
  #include <pexpert/pexpert.h>
-+#include <pexpert/pexpert/arm64/sweet_dev.h>
++#include <pexpert/arm64/sweet_dev.h>
  
  #include "IOHIDEventService.h"
  #include "IOHIDEventServiceUserClient.h"
@@ -617,6 +617,21 @@ index 0000000..b5363ed
 +/* End of GICv3 register definitions */
 +
 +#endif /* ! _PEXPERT_ARM64_GUACAMOLE_H */
+diff --git a/pexpert/pexpert/arm64/Makefile b/pexpert/pexpert/arm64/Makefile
+index c7d274f..1d300e1 100644
+--- a/pexpert/pexpert/arm64/Makefile
++++ b/pexpert/pexpert/arm64/Makefile
+@@ -18,7 +18,9 @@ PRIVATE_KERNELFILES = \
+ 	H13.h \
+ 	VMAPPLE.h \
+ 	BCM2837.h \
+-	SWEET.h
++	SWEET.h \
++	GUACAMOLE.h \
++	sweet_dev.h
+ 
+ 
+ # Headers installed into System.framework/PrivateHeaders (userspace internal SDK only).
 diff --git a/pexpert/pexpert/arm64/board_config.h b/pexpert/pexpert/arm64/board_config.h
 index 88e524a..121d6c5 100644
 --- a/pexpert/pexpert/arm64/board_config.h

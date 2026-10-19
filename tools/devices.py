@@ -60,41 +60,42 @@ DEVICES = {
     'guacamole': {
         # OnePlus 7 Pro (guacamole, SM8150). Board facts from the LineageOS
         # oneplus_sm8150 DTS (arch/arm64/boot/dts/18821/) and the mainline
-        # sm8150-oneplus-guacamole.dts; every entry still needs a check
-        # against the phone's own stock DTB (GUACAMOLE.md).
+        # sm8150-oneplus-guacamole.dts; audited against the GM1910's own live
+        # FDT on 2026-10-19 (tools/fdt-audit.py; see GUACAMOLE.md).
         'name': 'OnePlus 7 Pro (guacamole, SM8150)',
         'board_compat': 'oneplus,guacamole',
         'soc_compat': 'qcom,sm8150',
-        # SM8150 DDR: 2 GiB low bank (0x80000000) + high bank at
-        # 0x1_00000000; the high-bank size follows the SKU (6 GB: +4 GiB,
-        # 8 GB: +6 GiB, 12 GB: +10 GiB). All fixed carve-outs and dynamic
-        # pools live below 4 GiB, so the high bank is kernel-usable; the
-        # default keeps sweet's conservative 0xfcc00000 (fits every SKU) -
-        # bump it with `mkadt.py --dram-size` after the live FDT check.
-        'phys_base': 0xb0000000,
-        'mem_size': 0x4d000000,
-        'high_phys_base': 0x100000000,
-        'high_mem_size': 0xfcc00000,
-        'gicd': 0x17a00000,          # verify: SM8150 gic@17a00000 expected
+        # SM8150 DDR (audited on the GM1910's live FDT 2026-10-19): three
+        # banks - 0x80000000+0x3bb00000, 0xc0000000+0xc0000000 and
+        # 0x180000000+0x100000000; the 0x100000000..0x180000000 window (2 GiB)
+        # is OnePlus's mem-offline region and 0xbbb00000..0xc0000000 (69 MiB)
+        # is a hole, both absent from /memory. The phone path uses the upper
+        # bank; `phys_base`/`mem_size` name the 3 GiB mid bank (carve-out
+        # free) so QEMU/lowmem runs have a valid window too.
+        'phys_base': 0xc0000000,
+        'mem_size': 0xc0000000,
+        'high_phys_base': 0x180000000,
+        'high_mem_size': 0x100000000,
+        'gicd': 0x17a00000,          # confirmed on the live FDT
         'gicd_size': 0x10000,
-        'gicr': 0x17a60000,          # verify
+        'gicr': 0x17a60000,          # confirmed
         'gicr_size': 0x100000,
-        'timebase': 19200000,        # verify
-        'vtimer_intid': 19,          # verify: GIC_PPI 3 numbering
-        # reserved-memory cont_splash_region: 0x9C000000, 0x02400000
-        # (36 MiB) in the guacamole DTS; the mainline port drives the same
+        'timebase': 19200000,        # confirmed (clock-frequency)
+        'vtimer_intid': 19,          # confirmed (GIC_PPI 3 numbering)
+        # reserved-memory cont_splash_region: 0x9C000000, 0x02400000 (36 MiB);
+        # confirmed on the GM1910's live FDT. The mainline port drives the same
         # range as a simple-framebuffer (1440x3120, stride 5760, a8r8g8b8).
         'fb': 0x9c000000,
         'fb_size': 0x2400000,
         'fb_w': 1440,
         'fb_h': 3120,
         'fb_stride': 1440 * 4,
-        'ufs': 0x01d84000,           # verify: SM8150 ufshc@1d84000
+        'ufs': 0x01d84000,           # confirmed (ICE at 0x1d90000 too)
         'ufs_size': 0x3000,
         # Kryo 485: 4x A55 (silver) + 3x A76 (gold) + 1x A76 (prime).
         'cpu_compat': 'qcom,kryo485',
         'cpus': 8,
-        'cpu_regs': [0, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700],  # verify: MPIDR regs
+        'cpu_regs': [0, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700],  # confirmed (live FDT)
         'cpu_clocks': [1785600000] * 4 + [2419200000] * 3 + [2841600000],   # verify: opp tables
         'memory_frequency': 2133000000,
         'bus_frequency': 100000000,

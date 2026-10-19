@@ -165,7 +165,7 @@ interest_kind(const char *leaf)
 	if (seq(m, "ufshc")) {
 		return IT_UFS;
 	}
-	if (seq(m, "ufsphy")) {
+	if (seq(m, "ufsphy") || seq(m, "ufsphy_mem")) {
 		return IT_UFSPHY;
 	}
 	if (seq(m, "ssusb")) {
@@ -180,13 +180,13 @@ interest_kind(const char *leaf)
 	if (seq(m, "ssphy")) {
 		return IT_QMPPHY;
 	}
-	if (seq(m, "eud")) {
+	if (seq(m, "eud") || seq(m, "msm-eud")) {
 		return IT_EUD;
 	}
 	if (seq(m, "pinctrl")) {
 		return IT_TLMM;
 	}
-	if (seq(m, "clock-controller")) {
+	if (seq(m, "clock-controller") || seq(m, "gcc")) {
 		return IT_GCC;
 	}
 	if (seq(m, "mailbox")) {
@@ -232,7 +232,7 @@ interest_printable(unsigned it, uint64_t base)
 struct walk {
 	uintptr_t strtab;
 	unsigned depth, nodes;
-	unsigned ac, sc;			/* root cell sizes */
+	unsigned acs[MAX_DEPTH], scs[MAX_DEPTH];	/* #address/#size-cells per depth */
 	char stack[MAX_DEPTH][NAME_MAX];	/* leaf names by depth */
 	unsigned kind[MAX_DEPTH];
 	int reg_done[MAX_DEPTH];
@@ -279,17 +279,19 @@ print_reg(const char *label, const char *name, uint64_t base, uint64_t size)
 	con_str(label, buf);
 }
 
-/* First entry of a reg property, honouring the root cell sizes. */
+/* First entry of a reg property, using the parent's cell sizes. */
 static void
-decode_reg(struct walk *w, uintptr_t val, unsigned len, uint64_t *base, uint64_t *size)
+decode_reg(uintptr_t val, unsigned len, unsigned ac, unsigned sc, uint64_t *base, uint64_t *size)
 {
 	*base = *size = 0;
-	if (w->ac == 2 && len >= 16) {
+	if (ac == 2 && len >= 16) {
 		*base = ((uint64_t)be32(val) << 32) | be32(val + 4);
 		*size = ((uint64_t)be32(val + 8) << 32) | be32(val + 12);
-	} else if (len >= 8) {
+	} else if (len >= (ac + sc) * 4) {
 		*base = be32(val);
-		*size = be32(val + 4);
+		if (sc) {
+			*size = be32(val + ac * 4);
+		}
 	} else if (len >= 4) {
 		*base = be32(val);
 	}
@@ -300,13 +302,14 @@ on_prop(struct walk *w, const char *pname, uintptr_t val, unsigned len)
 {
 	unsigned d = w->depth;
 	unsigned k = w->kind[d];
+	unsigned ac = w->acs[d - 1], sc = w->scs[d - 1];	/* reg describes the parent */
 
-	if (d == 1 && seq(pname, "#address-cells") && len == 4) {
-		w->ac = be32(val);
+	if (seq(pname, "#address-cells") && len == 4) {
+		w->acs[d] = be32(val);
 		return;
 	}
-	if (d == 1 && seq(pname, "#size-cells") && len == 4) {
-		w->sc = be32(val);
+	if (seq(pname, "#size-cells") && len == 4) {
+		w->scs[d] = be32(val);
 		return;
 	}
 	if (len < 4) {
@@ -338,10 +341,10 @@ on_prop(struct walk *w, const char *pname, uintptr_t val, unsigned len)
 	switch (k) {
 	case K_MEM: {
 		uintptr_t p = val;
-		unsigned left = len, step = w->ac == 2 ? 16 : 8;
+		unsigned left = len, step = (ac + sc) * 4;
 		while (left >= step && room()) {
 			uint64_t base, size;
-			decode_reg(w, p, left, &base, &size);
+			decode_reg(p, left, ac, sc, &base, &size);
 			if (!base && !size) {
 				break;
 			}
@@ -354,7 +357,7 @@ on_prop(struct walk *w, const char *pname, uintptr_t val, unsigned len)
 	}
 	case K_RSVD_CHILD: {
 		uint64_t base, size;
-		decode_reg(w, val, len, &base, &size);
+		decode_reg(val, len, ac, sc, &base, &size);
 		w->rsvd_total++;
 		if (w->rsvd_shown < RSVD_MAX) {
 			w->rsvd_shown++;
@@ -365,7 +368,7 @@ on_prop(struct walk *w, const char *pname, uintptr_t val, unsigned len)
 	}
 	case K_CPU: {
 		/* Downstream cpu reg = <0x0 MPIDR>; mainline = <MPIDR> */
-		uint32_t reg = w->ac == 2 && len >= 8 ? be32(val + 4) : be32(val);
+		uint32_t reg = ac == 2 && len >= 8 ? be32(val + 4) : be32(val);
 		if (w->cpu_count < CPU_MAX) {
 			w->cpu_regs[w->cpu_count] = reg;
 		}
@@ -376,7 +379,7 @@ on_prop(struct walk *w, const char *pname, uintptr_t val, unsigned len)
 	case K_INTEREST ... K_INTEREST + 0xff: {
 		unsigned it = k - K_INTEREST;
 		uint64_t base, size;
-		decode_reg(w, val, len, &base, &size);
+		decode_reg(val, len, ac, sc, &base, &size);
 		if (interest_printable(it, base)) {
 			print_reg(interest_label(it), w->stack[d], base, size);
 		}
@@ -403,6 +406,9 @@ on_node(struct walk *w, const char *name)
 	}
 	w->kind[d] = K_NONE;
 	w->reg_done[d] = 0;
+	/* Cell sizes are inherited; only a node's own properties change them. */
+	w->acs[d] = w->acs[d - 1];
+	w->scs[d] = w->scs[d - 1];
 
 	if (d == 2) {
 		if (seq(leaf, "memory")) {
@@ -455,8 +461,8 @@ probe_report(uintptr_t dtb)
 	con_str("DTB", buf);
 
 	w.strtab = dtb + be32(dtb + 12);
-	w.ac = 2;
-	w.sc = 2;
+	w.acs[0] = 2;			/* root defaults per the DT spec */
+	w.scs[0] = 2;
 
 	uintptr_t q = dtb + be32(dtb + 8);
 	for (;;) {
@@ -521,7 +527,7 @@ probe_report(uintptr_t dtb)
 		*p = 0;
 		con_str("RSVD", buf);
 	}
-	con_hex2("CELLS", "ac=", w.ac, "sc=", w.sc);
+	con_hex2("CELLS", "ac=", w.acs[1], "sc=", w.scs[1]);
 	p = buf;
 	p = ps(p, "px0=", 6);
 	p = ph(p, fb_px0, 8);

@@ -6,12 +6,12 @@ runs the unmodified iPhone X iOS 16.7.16 userland, and keeps its HFS+ root
 inside the `userdata` partition.** Nothing about the userland, the ADT
 identity (`D22AP` / `iPhone10,3`) or the root image changes.
 
-Status: **port scaffold only - no kernel has been built or booted on a
-OnePlus 7 Pro yet.** The parameterization (ADT, shim, kernel machine config)
-is in place and the board facts below are read from the LineageOS
-`oneplus_sm8150` DTS (project dir `18821`) and the mainline
-`sm8150-oneplus-guacamole.dts`; values marked *(verify)* still need a check
-against the phone's own stock DTB before the first boot.
+Status: **port scaffold, hardware-audited; no kernel has been built or booted
+on a OnePlus 7 Pro yet.** The parameterization (ADT, shim, kernel machine
+config) is in place, a **probe boot image is built** (`shim/out/shim-boot.img`)
+and every *(verify)* value below was checked on a real GM1910 with
+`tools/fdt-audit.py` against the phone's own live FDT (see "Audited on the
+phone") - 20/20 match after the memory-layout fix.
 
 ## Where the device lives in the tree
 
@@ -29,11 +29,48 @@ it (black bars). `sweetfb_native=1` still switches to the raw panel size.
 
 ## Board facts (guacamole)
 
-Sources: LineageOS `android_kernel_oneplus_sm8150` (branch lineage-22.1,
-same values on 20/21/22.2/23.2), `arch/arm64/boot/dts/18821/`; mainline
+Sources: the phone's **own live FDT** (audited 2026-10-19, see below),
+LineageOS `android_kernel_oneplus_sm8150` (branch lineage-22.1, same values
+on 20/21/22.2/23.2), `arch/arm64/boot/dts/18821/`; mainline
 `sm8150-oneplus-guacamole.dts` (pmOS tree, kernel 6.17). Project id 18821 =
 OnePlus 7 Pro; **guacamoleb (OnePlus 7) is a different project (18857) with a
 different touch IC (Synaptics)** - do not mix the DTS directories.
+
+## Audited on the phone (2026-10-19)
+
+A retail GM1910 (OOS 12, build `GM1910_11_H.40`, slot `_b`, **bootloader
+unlocked**, Magisk root) was connected and its trees pulled read-only:
+
+| Pulled | Where |
+| --- | --- |
+| live FDT (`/sys/firmware/fdt`, ABL-patched + overlays, 749 KB) | `dtb/guacamole-live.dtb` (gitignored) |
+| stock `boot_b` (96 MB), extracted DTB container (12 MB) | `backup/boot_b.img`, `dtb/boot_unpacked/` (gitignored) |
+| `dtbo_b` (24 MB; carries the panel + S3SY761 touch overlay) | `backup/dtbo_b.img` (gitignored) |
+
+`tools/fdt-audit.py dtb/guacamole-live.dtb --device guacamole` reports
+**20/20 match** against `tools/devices.py` + the driver constants. Findings
+that changed the scaffold:
+
+- **Memory is not what the DTS suggested.** `/memory` has three banks:
+  `0x80000000+0x3bb00000`, `0xc0000000+0xc0000000` and
+  `0x180000000+0x100000000`; the `0x100000000..0x180000000` window (2 GiB) is
+  OnePlus's *mem-offline* region and `0xbbb00000..0xc0000000` (69 MiB) is a
+  hole - neither is in `/memory`. The port now puts the kernel in the upper
+  bank (`0x180000000`, 4 GiB) instead of sweet's stale `0x100000000`.
+- **TLMM is `0x03000000`** (`pinctrl@03000000`, +0xdc2000), not mainline's
+  `0x3100000`.
+- **RPMh command DB is `0xc3f0000c`** (live node `qcom,cmd-db@c3f000c`), the
+  same value sweet uses - RPMh votes are fully specified now.
+- **Touch** lives under `soc/i2c@0xc80000/Samsung_18821@48` with
+  `compatible = "sec-s6sy761"`, `reg = 0x48`, `irq-gpio` tlmm 122 - the node
+  comes from the **dtbo overlay**, not the base DTB (the base has neither the
+  panel nor the touch node).
+- Everything else (splash 0x9C000000+36 MiB, GIC 0x17a00000/0x17a60000,
+  timer, UFS 0x1d84000 + PHY 0x1d87000, SPMI 0xc440000, usb0 a600000 +
+  hsphy 88e2000 + QMP 88e8000, GCC 0x100000, IMEM 0x146bf000, PS_HOLD
+  0xc264000, CPU MPIDRs 0x0..0x700) matched the scaffold as built.
+
+## Board facts table
 
 | Area | Value | Confidence |
 | --- | --- | --- |
@@ -46,7 +83,7 @@ different touch IC (Synaptics)** - do not mix the DTS directories.
 | Display rails | vddio = pm8150_l14 (`ldoa14`); lab/ibb = PM8150L `lcdb@ec00` (`lcdb_ldo`/`lcdb_ncp`) | exact DTS |
 | USB | **usb0** = `ssusb@a600000` / `dwc3@a600000`; HS PHY `hsphy@88e2000`; QMP `ssphy@88e8000` (vdd pm8150_l18); `eud@88e0000`; extcon = PM8150B PD PHY (SID 2). `usb1` disabled | exact DTS |
 | Charger / battery | smb5 on SID 2 + `fg-gen4`, OPlus `bq27541` fuel gauge on se8 I2C, `stm8s` fast-charge MCU, `smb1390` charge pump | exact DTS |
-| SoC-level | GIC `0x17a00000`/`0x17a60000` (GIC-600, PPI 9 maintenance), CNTFRQ 19.2 MHz, VTIMER PPI 3 = INTID 19, UFS `ufshc@1d84000` (2 lanes, HS-G4), RPMh apps RSC `0x18220000` + TCS `0x18220d00`, MPIDR `0x0..0x700`, PSCI `smc`, PS_HOLD `0xc264000`, IMEM `146bf000` | exact DTS (lineage-24.0 / OnePlusOSS Q10 / mainline) |
+| SoC-level | GIC `0x17a00000`/`0x17a60000` (GIC-600, PPI 9 maintenance), CNTFRQ 19.2 MHz, VTIMER PPI 3 = INTID 19, UFS `ufshc@1d84000` (2 lanes, HS-G4), RPMh apps RSC `0x18220000` + TCS `0x18220d00` + cmd-db `0xc3f0000c`, MPIDR `0x0..0x700`, PSCI `smc`, PS_HOLD `0xc264000`, IMEM `146bf000` | exact DTS + **live FDT** |
 
 ## What the scaffold already does
 
@@ -80,30 +117,30 @@ recovery with `adb root` for log pulls.
 0. **Back up** `persist`, `modemst1/2`, `fsg`, `fsc`, `boot`, `dtbo`,
    `vbmeta` (same as sweet; `backup/` is gitignored).
 1. **Probe boot: run the shim *without* a payload first.** This is the
-   "does it boot at all" step, and it audits every *(verify)* value from
-   the live FDT on the phone itself:
+   "does it boot at all" step, and it audits every value from the live FDT on
+   the phone itself. The image is already built here
+   (`shim/out/shim-boot.img`, made with the pulled stock DTB); to rebuild:
    ```sh
    python3 tools/unpack_bootv2.py backup/boot.img dtb/boot_unpacked   # stock DTB
    BOARD=guacamole DTB=dtb/boot_unpacked/dtb shim/build.sh            # no payload
-   fastboot boot shim/out/shim-boot.img
+   fastboot boot shim/out/shim-boot.img                               # needs fastboot mode
    ```
-   The panel (ABL's splash) is taken over by the shim console and the
-   report shows: DTB size/version, root model/compatible, **MEM** banks,
-   **RSVD** carve-outs (`cont_splash_region 00009C000000+00002400000` is
-   the one the whole display path depends on), then GIC / TMR / SPMI /
-   UFS / USB / DWC3 / HSPHY / QMPPHY / TLMM / GCC / RSC / IMEM / PSHOLD,
-   `/chosen` initrd, the **CPUS** MPIDRs and the pre-console framebuffer
-   pixel stats (`FB px0=... lit=N/256`). It ends with the read-only UFS
-   probe and reboots after ~3 minutes (hold Power + Volume-Down for
-   fastboot). A photo of that screen is the complete audit; without a
-   phone the same report renders on a workstation:
+   Expected on the panel: `BOARD guacamole`, then the report - GIC
+   `0x17a00000`, TMR `0x17c20000`, SPMI `0xc440000`, UFS `0x1d84000` +
+   `ufsphy_mem`, USB `a600000`/`88e2000`/`88e8000`, TLMM `0x3000000`, GCC
+   `0x100000`, RSC `0x18220000`, IMEM/PSHOLD, **MEM three banks**, **RSVD
+   `cont_splash_region 00009C000000+00002400000`**, `/chosen` initrd, the
+   eight CPU MPIDRs and the pre-console framebuffer pixel stats. It ends with
+   the read-only UFS probe and reboots after ~3 minutes (hold Power +
+   Volume-Down for fastboot). If these lines appear at all, the ABL splash
+   handover works and item 2 can follow.
+   Without a phone the same report renders on a workstation:
    ```sh
    python3 tools/mkfdt-test.py /tmp/guac.dtb
    (cd shim && BOARD=guacamole DTB=/tmp/guac.dtb ./build.sh)
    ./shim/out/host_test /tmp/guac.dtb      # -> shim/out/probe.ppm
+   python3 tools/fdt-audit.py dtb/guacamole-live.dtb --device guacamole
    ```
-   Only when the report matches `tools/devices.py` / `sweet_dev.h` (or the
-   mismatches are folded back into them) go on to the kernel.
 2. **Build the kernel**: GitHub Actions -> `xnu` workflow with
    `machine_config=GUACAMOLE`; artifact `kernel.development.guacamole`.
 3. **Build the ADT + payload + boot image**:
@@ -152,20 +189,21 @@ recovery with `adb root` for log pulls.
 
 ## Risks
 
-- **Splash framebuffer**: both the OnePlus DTS and the mainline port place the
-  framebuffer at 0x9C000000 (36 MiB, 1440x3120), so the passthrough approach
-  should work - but whether `fastboot boot` keeps the panel lit on OnePlus's
-  ABL is only proven on the device. If it does not, a real DSI/DSC panel
-  driver becomes necessary (much larger job; the panel init sequence is in
-  `dsi-panel-samsung_oneplus_dsc.dtsi`).
-- **Memory holes**: the live `/memory` map is filled in by ABL at boot; a
-  sibling SM8150 device (Poco X3 Pro) ships a 52 MiB RAM hole that appears in
-  no carve-out. Check the shim's live-FDT output before using the whole high
-  bank (`--dram-size`).
-- **SMP**: MPIDRs (0x0..0x700) and PSCI (`smc`) are confirmed from the DTS,
-  but CPU_ON behaviour of the three clusters on production firmware is not;
-  start with `cpus=1` and add cores one at a time.
+- **Splash framebuffer**: the reserved-memory region is audited on the phone
+  (0x9C000000 + 36 MiB, matching the mainline port's simple-framebuffer), so
+  the address is right; whether OnePlus's ABL keeps the panel lit across
+  `fastboot boot` is the one thing only the probe boot can prove. If it does
+  not, a real DSI/DSC panel driver becomes necessary (much larger job; the
+  panel init sequence is in the dtbo's `dsi-panel-samsung_oneplus_dsc`).
+- **Memory holes**: the live `/memory` already excludes the mem-offline
+  window and the 69 MiB hole; the port's upper-bank choice sits entirely
+  inside a listed bank. Check the report's MEM lines against
+  `tools/devices.py` on any other unit/SKU.
+- **SMP**: MPIDRs (0x0..0x700) and PSCI (`smc`) are confirmed, but CPU_ON
+  behaviour of the three clusters on production firmware is not; start with
+  `cpus=1` and add cores one at a time.
 - **UFS 3.0**: the register block is shared, but the link is ABL's to set up;
   same "don't touch the PHY" approach as sweet.
 - **Boot artifacts**: keep `research/ipsw-x/d22ap.adt` (iPhone X `/product`)
-  from the sweet machine; without it mkadt omits `/product`.
+  from the sweet machine; without it mkadt omits `/product`. Device dumps
+  (`dtb/`, `backup/`) stay out of git.

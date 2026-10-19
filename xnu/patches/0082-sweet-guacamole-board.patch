@@ -645,10 +645,10 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..557ac6a
+index 0000000..d9e479e
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
-@@ -0,0 +1,130 @@
+@@ -0,0 +1,129 @@
 +#ifndef _PEXPERT_ARM64_SWEET_DEV_H
 +#define _PEXPERT_ARM64_SWEET_DEV_H
 +
@@ -701,13 +701,12 @@ index 0000000..557ac6a
 +#define SWEET_DEV_KEYS_VOLUME   0
 +
 +/* RPMh: apps RSC / DRV-2 at 0x18220000, TCS command registers at
-+ * 0x18220d00 (offset 0xd00; ACTIVE 2 / SLEEP 3 / WAKE 3). Same layout as
-+ * sweet; the command DB address (sweet: 0xc3f0000c) still needs the live
-+ * FDT check before RPMh votes are enabled. */
++ * 0x18220d00 (offset 0xd00; ACTIVE 2 / SLEEP 3 / WAKE 3), command DB at
++ * 0xc3f0000c (live FDT "qcom,cmd-db@c3f000c" - same as sweet). */
 +#define SWEET_DEV_RPMH_RSC_PA   0x18220000u
 +#define SWEET_DEV_RPMH_TCS_PA   0x18220d00u
 +#define SWEET_DEV_RPMH_TCS_SIZE 0x3000u
-+#define SWEET_DEV_RPMH_DICT_PA  0x0c3f000cu      /* VERIFY: cmd DB address */
++#define SWEET_DEV_RPMH_DICT_PA  0x0c3f0000cu
 +
 +/* Touch: Samsung S6SY761 @0x48 on qupv3 SE17 I2C (i2c@0xc80000, SPI 373),
 + * IRQ tlmm 122, reset tlmm 54, 1.8 V I/O switch tlmm 119, vdd pm8150_l17
@@ -715,7 +714,7 @@ index 0000000..557ac6a
 +#define SWEET_DEV_TOUCH         0
 +#define SWEET_DEV_TOUCH_SE_PA   0x00c80000u
 +#define SWEET_DEV_TOUCH_GCC_PA  0x00100000u
-+#define SWEET_DEV_TOUCH_NORTH_PA 0x03100000u     /* tlmm@3100000 */
++#define SWEET_DEV_TOUCH_NORTH_PA 0x03000000u     /* live tree pinctrl@03000000 */
 +#define SWEET_DEV_TOUCH_GCC_VOTE 0x5200cu        /* VERIFY: GCC SE17 vote offset */
 +#define SWEET_DEV_TOUCH_RCG     0x18148u         /* VERIFY: wrapper1 S17 divider */
 +

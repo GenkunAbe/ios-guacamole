@@ -2,6 +2,34 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### 2026-10-19 (evening): GM1910 connected - live-FDT audit, probe image ready
+- Phone: OnePlus 7 Pro **GM1910** (China), OOS 12 `GM1910_11_H.40`, slot `_b`,
+  **bootloader unlocked** (`ro.boot.flash.locked 0`, orange), Magisk root over adb.
+- Pulled read-only into the gitignored dirs: live FDT `dtb/guacamole-live.dtb`
+  (749 KB, ABL-patched + dtbo overlays), `backup/boot_b.img` (96 MB) with
+  `dtb/boot_unpacked/` (stock DTB container, 12 MB), `backup/dtbo_b.img` (24 MB;
+  the panel + `Samsung_18821@48`/`sec-s6sy761` touch node live in the **dtbo**, not
+  in the base DTB).
+- New `tools/fdt-audit.py` (DTB parser + check table vs `tools/devices.py` and the
+  driver constants; per-parent #address/#size-cells). Run:
+  `python3 tools/fdt-audit.py dtb/guacamole-live.dtb --device guacamole` -> **20/20 match**.
+- Corrections it forced (all applied): memory really is
+  `0x80000000+0x3bb00000`, `0xc0000000+0xc0000000`, `0x180000000+0x100000000`
+  (2 GiB mem-offline window at 0x100000000 and a 69 MiB hole are NOT memory) -
+  `devices.py` now uses the upper bank 0x180000000+4 GiB; TLMM is `0x03000000`;
+  RPMh cmd-db `0xc3f0000c`; touch bus `i2c@0xc80000` confirmed. Everything else
+  (splash 0x9C000000+36 MiB, GIC, timer, UFS+PHY, SPMI, USB trio, GCC, IMEM,
+  PS_HOLD, MPIDRs, VPPI19) matched as built.
+- `shim/probe.c` fixed the same way (per-node cell sizes; live-tree node names
+  `qcom,gcc`, `ufsphy_mem`, `msm-eud` now matched). Host-rendered the report from
+  the **real** live FDT: every line decodes correctly.
+- **Probe boot image is built**: `shim/out/shim-boot.img` (BOARD=guacamole,
+  stock DTB). Next action: `fastboot boot shim/out/shim-boot.img` (needs fastboot
+  mode; not yet tested - fastboot was not entered from this machine).
+- Still open: kernel CI run (`machine_config=GUACAMOLE`, needs the repo owner or a
+  fork/token), then the payload boot with `cpus=1`; S6SY761 driver, volume-key
+  APIDs, USB GCC offsets, smb5 as before.
+
 ### 2026-10-19: guacamole port scaffold (OnePlus 7 Pro, SM8150), earlier workstation note below
 - New: `tools/devices.py` (per-board profile) + `tools/mkadt.py --device sweet|guacamole`;
   `shim/boards/*.h` + `BOARD=guacamole shim/build.sh` (also `DTB=` and `UFS_BASE` moved there);

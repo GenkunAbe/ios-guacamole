@@ -270,10 +270,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..a7dba8a
+index 0000000..ca765be
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,769 @@
+@@ -0,0 +1,801 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -387,33 +387,41 @@ index 0000000..a7dba8a
 + * north +0x900000, south +0xD00000, pins at tile + 0x1000 * gpio, ctl at
 + * +0 and io (latch/level) at +4. Addressing the region without the tile
 + * offset reads zero for every pin and silently drops writes (that is how
-+ * the first guacamole boots lost the 1.8 V enable and the I2C mux).
++ * the first guacamole boots lost the 1.8 V enable and the I2C mux). Each
++ * tile is mapped separately: one 14 MiB mapping does not fit this kernel's
++ * VA space (ksem_alloc of 0xe00000 failed).
 + */
-+static uint32_t
++enum { TS_TILE_WEST, TS_TILE_EAST, TS_TILE_NORTH, TS_TILE_SOUTH, TS_TILE_COUNT };
++
++static vm_offset_t ts_tiles[TS_TILE_COUNT];
++
++static unsigned
 +ts_tile(unsigned pin)
 +{
 +	if (pin <= 7 || pin == 38 || (pin >= 51 && pin <= 82) ||
 +	    (pin >= 98 && pin <= 101) || (pin >= 114 && pin <= 124) ||
 +	    (pin >= 126 && pin <= 154)) {
-+		return 0x00d00000u;	/* south: touch, panel reset, keys */
++		return TS_TILE_SOUTH;	/* touch, panel reset, keys */
 +	}
 +	if ((pin >= 8 && pin <= 20) || (pin >= 31 && pin <= 37) ||
 +	    (pin >= 39 && pin <= 42) || (pin >= 83 && pin <= 86) ||
 +	    (pin >= 88 && pin <= 97) || (pin >= 102 && pin <= 104) ||
 +	    pin >= 169) {
-+		return 0x00900000u;	/* north */
++		return TS_TILE_NORTH;
 +	}
 +	if ((pin >= 21 && pin <= 30) || (pin >= 43 && pin <= 50) || pin == 87) {
-+		return 0x00500000u;	/* east */
++		return TS_TILE_EAST;
 +	}
-+	return 0x00100000u;		/* west: 105-113, 125, 155-168 */
++	return TS_TILE_WEST;		/* 105-113, 125, 155-168 */
 +}
 +
-+#define TS_GPIO_CFG(n)  (ts_tile(n) + (uint32_t)(n) * 0x1000u)
-+#define TS_GPIO_IO(n)   (TS_GPIO_CFG(n) + 4u)
++#define TS_GPIO_OFF(n)    ((uint32_t)(n) * 0x1000u)
++#define TS_GPIO_ADDR(n)   (ts_tiles[ts_tile(n)] + TS_GPIO_OFF(n))
++#define TS_GPIO_IO_OFF(n) (TS_GPIO_OFF(n) + 4u)
++
 +
 +static struct {
-+	vm_offset_t se, gcc, gpio;
++	vm_offset_t se, gcc;
 +	bool started, dead;
 +	unsigned sent, got, events;
 +	uint32_t irq_status, irq_last;
@@ -438,6 +446,30 @@ index 0000000..a7dba8a
 +	__asm__ volatile("dmb oshst" ::: "memory");
 +	*(volatile uint32_t *)(base + off) = v;
 +	__asm__ volatile("dsb osh" ::: "memory");
++}
++
++static uint32_t
++ts_gpio_rd(unsigned pin)
++{
++	return ts_rd(ts_tiles[ts_tile(pin)], TS_GPIO_OFF(pin));
++}
++
++static uint32_t
++ts_gpio_io_rd(unsigned pin)
++{
++	return ts_rd(ts_tiles[ts_tile(pin)], TS_GPIO_IO_OFF(pin));
++}
++
++static void
++ts_gpio_wr(unsigned pin, uint32_t v)
++{
++	ts_wr(ts_tiles[ts_tile(pin)], TS_GPIO_OFF(pin), v);
++}
++
++static void
++ts_gpio_io_wr(unsigned pin, uint32_t v)
++{
++	ts_wr(ts_tiles[ts_tile(pin)], TS_GPIO_IO_OFF(pin), v);
 +}
 +
 +static bool
@@ -465,16 +497,14 @@ index 0000000..a7dba8a
 +static void
 +ts_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out, bool high)
 +{
-+	uint32_t off = TS_GPIO_CFG(pin);
-+	uint32_t cfg = ts_rd(ts.gpio, off);
++	uint32_t cfg = ts_gpio_rd(pin);
 +	if (out) {
 +		/* Latch the level before switching the pin to output. */
-+		ts_wr(ts.gpio, TS_GPIO_IO(pin),
-+		    (ts_rd(ts.gpio, TS_GPIO_IO(pin)) & ~2u) | (high ? 2u : 0u));
++		ts_gpio_io_wr(pin, (ts_gpio_io_rd(pin) & ~2u) | (high ? 2u : 0u));
 +	}
 +	cfg &= ~0x3ffu;
 +	cfg |= (mux << 2) | pull | (drive << 6) | (out ? 0x200u : 0u);
-+	ts_wr(ts.gpio, off, cfg);
++	ts_gpio_wr(pin, cfg);
 +}
 +
 +static uint32_t
@@ -892,11 +922,13 @@ index 0000000..a7dba8a
 +
 +	printf("SWEET TOUCH: mapping GCC/TLMM/SE17\n");
 +	ts.gcc = ml_io_map(SWEET_DEV_TOUCH_GCC_PA, 0x100000);
-+	/* The whole region (live tree pinctrl@03000000 size 0xdc2000) holds the
-+	 * four tile arrays; the touch pins live at +0xD00000, so map it all. */
-+	ts.gpio = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA, 0xe00000);
++	ts_tiles[TS_TILE_WEST] = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA + 0x00100000u, 0x100000);
++	ts_tiles[TS_TILE_EAST] = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA + 0x00500000u, 0x100000);
++	ts_tiles[TS_TILE_NORTH] = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA + 0x00900000u, 0x100000);
++	ts_tiles[TS_TILE_SOUTH] = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA + 0x00d00000u, 0x100000);
 +	ts.se = ml_io_map(SWEET_DEV_TOUCH_SE_PA, 0x4000);
-+	if (!ts.gcc || !ts.gpio || !ts.se) {
++	if (!ts.gcc || !ts.se || !ts_tiles[0] || !ts_tiles[1] ||
++	    !ts_tiles[2] || !ts_tiles[3]) {
 +		printf("SWEET TOUCH: MMIO mapping failed\n");
 +		goto out;
 +	}
@@ -905,26 +937,26 @@ index 0000000..a7dba8a
 +	}
 +
 +	printf("SWEET TOUCH: pins reset=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x ios=%#x\n",
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_RESET)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_RESET)),
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_1V8)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_1V8)),
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)),
++	    ts_gpio_rd(TS_PIN_RESET), ts_gpio_io_rd(TS_PIN_RESET),
++	    ts_gpio_rd(TS_PIN_1V8), ts_gpio_io_rd(TS_PIN_1V8),
++	    ts_gpio_rd(TS_PIN_IRQ), ts_gpio_io_rd(TS_PIN_IRQ),
 +	    ts_rd(ts.se, 0x908));
 +
 +	/* TLMM write probe: three values, 32-bit twice and one byte write, each
 +	 * followed by a barrier and a readback. gpio104 is gpio-only in mainline. */
-+	ts_wr(ts.gpio, TS_GPIO_CFG(104), 0x000000c3u);
++	ts_gpio_wr(104, 0x000000c3u);
 +	ts_wait(1);
-+	printf("SWEET TOUCH: tlmm w32 c3 -> %#x\n", ts_rd(ts.gpio, TS_GPIO_CFG(104)));
-+	ts_wr(ts.gpio, TS_GPIO_CFG(104), 0x000000c4u);
++	printf("SWEET TOUCH: tlmm w32 c3 -> %#x\n", ts_gpio_rd(104));
++	ts_gpio_wr(104, 0x000000c4u);
 +	ts_wait(1);
-+	printf("SWEET TOUCH: tlmm w32 c4 -> %#x\n", ts_rd(ts.gpio, TS_GPIO_CFG(104)));
-+	*(volatile uint8_t *)(ts.gpio + TS_GPIO_CFG(104)) = 0xc5;
++	printf("SWEET TOUCH: tlmm w32 c4 -> %#x\n", ts_gpio_rd(104));
++	*(volatile uint8_t *)TS_GPIO_ADDR(104) = 0xc5;
 +	ts_wait(1);
-+	printf("SWEET TOUCH: tlmm w8  c5 -> %#x\n", ts_rd(ts.gpio, TS_GPIO_CFG(104)));
++	printf("SWEET TOUCH: tlmm w8  c5 -> %#x\n", ts_gpio_rd(104));
 +	/* UFS reset lives at 0xB6000 (mainline UFS_RESET) and must be configured
 +	 * by the bootloader that just read the root filesystem. */
 +	printf("SWEET TOUCH: tlmm ufsrst=%#x panelrst=%#x\n",
-+	    ts_rd(ts.gpio, 0xdb6000u), ts_rd(ts.gpio, TS_GPIO_CFG(6)));
++	    ts_rd(ts_tiles[TS_TILE_SOUTH], 0xb6000u), ts_gpio_rd(6));
 +
 +	/* Route the SE17 lines to the QUP function (device tree: gpio55/56 as
 +	 * qup17, 2 mA, no pulls) in case the bootloader left them as GPIO. */
@@ -943,10 +975,10 @@ index 0000000..a7dba8a
 +	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, true);   /* reset released */
 +	ts_wait(70);
 +	printf("SWEET TOUCH: pins now rst=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x i2c=%#x/%#x ios=%#x\n",
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_RESET)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_RESET)),
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_1V8)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_1V8)),
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)),
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_I2C_SDA)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_I2C_SDA)),
++	    ts_gpio_rd(TS_PIN_RESET), ts_gpio_io_rd(TS_PIN_RESET),
++	    ts_gpio_rd(TS_PIN_1V8), ts_gpio_io_rd(TS_PIN_1V8),
++	    ts_gpio_rd(TS_PIN_IRQ), ts_gpio_io_rd(TS_PIN_IRQ),
++	    ts_gpio_rd(TS_PIN_I2C_SDA), ts_gpio_io_rd(TS_PIN_I2C_SDA),
 +	    ts_rd(ts.se, 0x908));
 +
 +	ts.probing = true;

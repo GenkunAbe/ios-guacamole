@@ -133,6 +133,20 @@
   (different regions) were fine. Touch pin tiles: panel reset gpio6, touch 54/55/56/119/122
   are SOUTH; the shim's gpio104 test pin is NORTH. Both the kernel driver and the shim
   probe now carry the tile map.
+- **🎉 TOUCH WORKS ON GUACAMOLE (2026-10-19 ~23:25 local, image t10).** Coordinates appear
+  on screen when touching (`SWEET TOUCH: f0 down x,y` / `f0 up`), so the full chain is up:
+  TLMM tile addressing -> pin config (reset 54, 1.8 V enable 119, IRQ 122, bus 55/56) ->
+  RPMh ldoa17 3008 mV -> vendor reset timing -> boot-complete event -> DEVICE_ID "671" ->
+  SENSE_ON -> sec_ts event decoding -> sweet_hid_touch(). Two platform traps had to be
+  fixed on the way: (1) the SM8150 TLMM is four tile arrays at +0x100000/+0x500000/
+  +0x900000/+0xD00000 inside 0x03000000 (touch pins SOUTH), and one 14 MiB mapping does
+  not fit, so each tile is mapped separately; (2) SE17 has GENI_IF_DISABLE_RO (0x64) bit0
+  set - its FIFO interface is fused off and only GPI DMA could drive it - so the transport
+  is now a GPIO bit-bang I2C (about 100 kHz, open-drain emulation, SDA/SCL auto-swapped on
+  the first NAK). The SE registers are only printed for the record. Note the current
+  guacamole boot has no root (the UFS HFS+ mount fails with unknown volume signature), so
+  no userland consumes the HID events yet; the driver side is complete.
+
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

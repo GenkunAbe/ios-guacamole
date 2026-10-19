@@ -251,10 +251,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..394ac59
+index 0000000..67915bf
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,640 @@
+@@ -0,0 +1,689 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -366,7 +366,7 @@ index 0000000..394ac59
 +static struct {
 +	vm_offset_t se, gcc, gpio;
 +	bool started, dead;
-+	unsigned sent, got;
++	unsigned sent, got, events;
 +	uint32_t irq_status, irq_last;
 +	bool probing;
 +	int x[TS_MAX_FINGERS], y[TS_MAX_FINGERS];
@@ -610,11 +610,49 @@ index 0000000..394ac59
 +			return false;
 +		}
 +	}
-+	const uint32_t branches[] = {0x1e004, 0x1e008, 0x1e00c, 0x1e010, 0x1e144};
++	/*
++	 * Branch status as in clk_branch2_check_halt (mainline and vendor agree):
++	 * CLK_OFF (bit 31) clear means running; bits 30:28 are the NOC FSM state
++	 * with 0b010 = on. Only these three registers belong to wrap2: the extra
++	 * entries in sweet's SM6150 list (0x1e00c/0x1e010) are not clock
++	 * registers on SM8150 and read back with bit 31 set. s_ahb has a
++	 * hardware clock gating bit (0x1e008 bit 1) that skips the halt check.
++	 */
++	const uint32_t branches[] = {0x1e004, 0x1e008, 0x1e144};
++	bool clocks_ok = true;
 +	for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
-+		if (!ts_wait_clear(ts.gcc, branches[i], 1u << 31)) {
-+			printf("SWEET TOUCH: GCC branch %#x halted (%#x)\n", branches[i],
-+			    ts_rd(ts.gcc, branches[i]));
++		uint32_t off = branches[i];
++		uint32_t val = ts_rd(ts.gcc, off);
++		bool up = false;
++		const char *tag = "HALTED";
++		for (unsigned t = 0; t < 5000; ++t) {
++			val = ts_rd(ts.gcc, off);
++			if (!(val & (1u << 31))) {
++				up = true;
++				tag = "ok";
++				break;
++			}
++			if (((val >> 28) & 0x7u) == 0x2u) {
++				up = true;
++				tag = "fsm-on";
++				break;
++			}
++			if (off == 0x1e008u && (val & (1u << 1))) {
++				up = true;
++				tag = "hwcg";
++				break;
++			}
++			delay(1);
++		}
++		printf("SWEET TOUCH: br %#x=%#x %s\n", off, val, tag);
++		clocks_ok = clocks_ok && up;
++	}
++	if (!clocks_ok) {
++		int force = 0;
++		(void)PE_parse_boot_argn("sweetforce", &force, sizeof(force));
++		printf("SWEET TOUCH: wrap2 clocks not fully up; %s\n",
++		    force ? "probing anyway (sweetforce)" : "probes withheld");
++		if (!force) {
 +			return false;
 +		}
 +	}
@@ -706,6 +744,7 @@ index 0000000..394ac59
 +static int
 +ts_handle_event(const uint8_t *ev)
 +{
++	static unsigned moves;
 +	if (!ev[0]) {
 +		return 0;
 +	}
@@ -727,11 +766,18 @@ index 0000000..394ac59
 +		ts.x[id] = x;
 +		ts.y[id] = y;
 +		ts.down[id] = true;
++		ts.events++;
++		if (state == 1 || (++moves % 25u) == 0) {
++			printf("SWEET TOUCH: f%u %s %d,%d\n", id,
++			    state == 1 ? "down" : "move", x, y);
++		}
 +		sweet_hid_touch((int)id, 1, x, y);
 +		return 1;
 +	case 3: /* release */
 +		if (ts.down[id]) {
 +			ts.down[id] = false;
++			ts.events++;
++			printf("SWEET TOUCH: f%u up %d,%d\n", id, ts.x[id], ts.y[id]);
 +			sweet_hid_touch((int)id, 0, ts.x[id], ts.y[id]);
 +		}
 +		return 1;
@@ -850,7 +896,7 @@ index 0000000..394ac59
 +		printf("SWEET TOUCH: SENSE_ON ok, polling at 10 ms\n");
 +	}
 +
-+	unsigned errors = 0;
++	unsigned errors = 0, ticks = 0;
 +	while (!ts.dead) {
 +		int r = ts_poll();
 +		if (r < 0) {
@@ -863,6 +909,9 @@ index 0000000..394ac59
 +			}
 +		} else {
 +			errors = 0;
++		}
++		if ((++ticks % 1000u) == 0u) { /* every 10 s: loop alive */
++			printf("SWEET TOUCH: alive events=%u\n", ts.events);
 +		}
 +		ts_wait(10);
 +	}

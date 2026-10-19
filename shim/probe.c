@@ -441,6 +441,45 @@ on_node(struct walk *w, const char *name)
 	}
 }
 
+/*
+ * TLMM access test. The kernel's GPIO writes read back as zero on this board,
+ * so check the same registers here, from the boot environment with the MMU
+ * off: reads of the touch pins, a count of pins whose ctl is non-zero (a
+ * wrong base makes every read zero) and a write/readback on gpio104, which
+ * mainline lists with the gpio function only.
+ */
+static void
+probe_tlmm(void)
+{
+	volatile uint32_t *t = (volatile uint32_t *)(uintptr_t)BOARD_TLMM_PA;
+#define TLMM_CTL(pin)	t[((pin) * 0x1000u) / 4u]
+#define TLMM_IO(pin)	t[((pin) * 0x1000u) / 4u + 1u]
+	static const unsigned touch_pins[] = {54, 55, 56, 119, 122};
+
+	for (unsigned i = 0; i < 5; ++i) {
+		unsigned p = touch_pins[i];
+		con_hex2("TLMM", "ctl=", TLMM_CTL(p), "io=", TLMM_IO(p));
+	}
+	unsigned nz = 0, shown = 0;
+	for (unsigned p = 0; p < 175; ++p) {
+		uint32_t v = TLMM_CTL(p);
+		if (v) {
+			nz++;
+			if (shown < 3) {
+				con_hex2("TLMM nz", "pin=", p, "ctl=", v);
+				shown++;
+			}
+		}
+	}
+	con_hex("TLMM pins", nz);
+	uint32_t before = TLMM_CTL(104);
+	TLMM_CTL(104) = 0x000000c3u;	/* gpio, pull-up, 8 mA, input */
+	uint32_t after = TLMM_CTL(104);
+	con_hex2("TLMM wr", "old=", before, "new=", after);
+#undef TLMM_CTL
+#undef TLMM_IO
+}
+
 void
 probe_report(uintptr_t dtb)
 {
@@ -452,6 +491,7 @@ probe_report(uintptr_t dtb)
 		z[i] = 0;
 	}
 	con_str("PROBE", "live FDT report");
+	probe_tlmm();
 
 	if (!dtb || be32(dtb) != FDT_MAGIC) {
 		con_str("DTB", "no device tree");

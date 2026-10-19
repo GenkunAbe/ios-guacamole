@@ -28,3 +28,6 @@
 
 /* The UFS probe is safe on sweet (ABL leaves the host running). */
 #define PROBE_UFS		1
+
+/* TLMM (pinctrl) base: pin stride 0x1000, ctl at +0, io at +4. */
+#define BOARD_TLMM_PA		0x03900000UL

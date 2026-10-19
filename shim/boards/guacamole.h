@@ -42,3 +42,6 @@
  * the kernel's USB gadget writes its progress marker here and the shim
  * prints it before jumping (see pexpert/pexpert/arm64/sweet_dev.h). */
 #define MARK_PA			0x198000000UL
+
+/* TLMM (pinctrl) base: pin stride 0x1000, ctl at +0, io at +4. */
+#define BOARD_TLMM_PA		0x03000000UL

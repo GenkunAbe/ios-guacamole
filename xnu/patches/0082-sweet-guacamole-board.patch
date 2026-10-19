@@ -270,10 +270,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..facbd2f
+index 0000000..fb6b4aa
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,722 @@
+@@ -0,0 +1,736 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -875,10 +875,23 @@ index 0000000..facbd2f
 +		goto out;
 +	}
 +
-+	printf("SWEET TOUCH: pins reset=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x\n",
++	printf("SWEET TOUCH: pins reset=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x ios=%#x\n",
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_RESET)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_RESET)),
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_1V8)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_1V8)),
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)));
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)),
++	    ts_rd(ts.se, 0x908));
++
++	/* TLMM write probe: three values, 32-bit twice and one byte write, each
++	 * followed by a barrier and a readback. gpio104 is gpio-only in mainline. */
++	ts_wr(ts.gpio, TS_GPIO_CFG(104), 0x000000c3u);
++	ts_wait(1);
++	printf("SWEET TOUCH: tlmm w32 c3 -> %#x\n", ts_rd(ts.gpio, TS_GPIO_CFG(104)));
++	ts_wr(ts.gpio, TS_GPIO_CFG(104), 0x000000c4u);
++	ts_wait(1);
++	printf("SWEET TOUCH: tlmm w32 c4 -> %#x\n", ts_rd(ts.gpio, TS_GPIO_CFG(104)));
++	*(volatile uint8_t *)(ts.gpio + TS_GPIO_CFG(104)) = 0xc5;
++	ts_wait(1);
++	printf("SWEET TOUCH: tlmm w8  c5 -> %#x\n", ts_rd(ts.gpio, TS_GPIO_CFG(104)));
 +
 +	/* Route the SE17 lines to the QUP function (device tree: gpio55/56 as
 +	 * qup17, 2 mA, no pulls) in case the bootloader left them as GPIO. */
@@ -896,11 +909,12 @@ index 0000000..facbd2f
 +	ts_wait(5);
 +	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, true);   /* reset released */
 +	ts_wait(70);
-+	printf("SWEET TOUCH: pins now rst=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x i2c=%#x/%#x\n",
++	printf("SWEET TOUCH: pins now rst=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x i2c=%#x/%#x ios=%#x\n",
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_RESET)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_RESET)),
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_1V8)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_1V8)),
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)),
-+	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_I2C_SDA)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_I2C_SDA)));
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_I2C_SDA)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_I2C_SDA)),
++	    ts_rd(ts.se, 0x908));
 +
 +	ts.probing = true;
 +	ts.ack_err = ts_wait_ready(TS_ACK_BOOT_COMPLETE, 100);

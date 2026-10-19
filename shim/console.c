@@ -66,6 +66,16 @@ void con_skip(void)
 	row++;
 }
 
+/* Redraw a line at an explicit row without moving the cursor (status lines). */
+void con_at(int r, const char *label, const char *s)
+{
+	int save = row;
+
+	row = r;
+	con_str(label, s);
+	row = save;
+}
+
 int con_row(void)
 {
 	return row;

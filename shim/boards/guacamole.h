@@ -32,3 +32,8 @@
 /* Internal UFS host (ufshc@1d84000, 2 lanes, HS-G4); verify base/size
  * against the DTB. */
 #define UFS_BASE		0x01d84000UL
+
+/* Skip the read-only UFS register probe on guacamole: reading the host
+ * registers while ABL has it gated stalls the bus and the watchdog resets
+ * the phone (observed 2026-10-19). The xnu driver reports UFS state later. */
+#define PROBE_UFS		0

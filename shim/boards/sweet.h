@@ -22,3 +22,6 @@
 
 /* Internal UFS host (ufshc@1d84000 "ufs_mem"); probe path only. */
 #define UFS_BASE		0x01d84000UL
+
+/* The UFS probe is safe on sweet (ABL leaves the host running). */
+#define PROBE_UFS		1

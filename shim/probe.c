@@ -29,7 +29,11 @@
 #define NAME_SHOW	22
 #define RSVD_MAX	16
 #define CPU_MAX		16
+#if PROBE_UFS
 #define KEEP_ROWS	14	/* leave room for the UFS probe after the report */
+#else
+#define KEEP_ROWS	4	/* only the closing lines (probe disabled) */
+#endif
 
 /* Captured before the console clears ABL's splash. */
 static uint32_t fb_px0;
@@ -367,8 +371,9 @@ on_prop(struct walk *w, const char *pname, uintptr_t val, unsigned len)
 		return;
 	}
 	case K_CPU: {
-		/* Downstream cpu reg = <0x0 MPIDR>; mainline = <MPIDR> */
-		uint32_t reg = ac == 2 && len >= 8 ? be32(val + 4) : be32(val);
+		/* Downstream cpu reg = <0x0 MPIDR> even though /cpus declares
+		 * #address-cells = <1>; go by the length, not the declaration. */
+		uint32_t reg = len >= 8 ? be32(val + 4) : be32(val);
 		if (w->cpu_count < CPU_MAX) {
 			w->cpu_regs[w->cpu_count] = reg;
 		}

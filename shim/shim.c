@@ -364,6 +364,52 @@ static uint32_t to_us(uint64_t ticks)
 	return ticks * 10 / 192;	/* 19.2 MHz */
 }
 
+/* "idle 30s of 180, then reset" on one fixed line: the probe is alive. */
+static void probe_countdown(unsigned total_s)
+{
+	char buf[40];
+
+	for (unsigned s = 0; s < total_s; s += 10) {
+		char *p = buf;
+		const char *a = "idle ";
+		while (*a) {
+			*p++ = *a++;
+		}
+		unsigned v = s, d = 1;
+		while (v >= 10) {
+			v /= 10;
+			d *= 10;
+		}
+		unsigned x = s;
+		while (d) {
+			*p++ = '0' + (x / d) % 10;
+			d /= 10;
+		}
+		a = "s of ";
+		while (*a) {
+			*p++ = *a++;
+		}
+		v = total_s;
+		d = 1;
+		while (v >= 10) {
+			v /= 10;
+			d *= 10;
+		}
+		x = total_s;
+		while (d) {
+			*p++ = '0' + (x / d) % 10;
+			d /= 10;
+		}
+		a = "s, then reset";
+		while (*a) {
+			*p++ = *a++;
+		}
+		*p = 0;
+		con_at(con_rows() - 2, "PROBE", buf);
+		delay_ms(10000);
+	}
+}
+
 void shim_main(uint64_t dtb)
 {
 	struct mmu_info mi;
@@ -389,13 +435,18 @@ void shim_main(uint64_t dtb)
 	probe_report(dtb);
 	con_skip();
 
-	/* Also probe the internal UFS while the MMU is still off. */
+	/* Read-only UFS state probe; not safe on every board (see PROBE_UFS). */
 	stage = "ufs";
+#if PROBE_UFS
 	test_ufs();
+#else
+	con_str("UFS", "probe skipped on this board (PROBE_UFS=0)");
+#endif
 	con_skip();
-	con_str("PROBE", "done, reset in ~3 min");
-	delay_ms(180000);
-	reset(20);
+	/* Live countdown: shows the screen is not hung and when the reset fires. */
+	stage = "idle";
+	probe_countdown(180);
+	reset(0);
 
 	stage = "fill off";
 	uint64_t fill_off = ticks_fill(RED);

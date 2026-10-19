@@ -12,6 +12,8 @@ extern volatile uint32_t *con_fb;
 
 void con_clear(uint32_t bg);
 void con_skip(void);
+/* redraw one line at an explicit row (probe status/countdown) */
+void con_at(int row, const char *label, const char *text);
 /* current row / rows and cols that fit on the panel (probe.c adapts its report) */
 int con_row(void);
 int con_rows(void);

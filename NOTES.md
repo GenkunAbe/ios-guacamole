@@ -2,6 +2,26 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### 2026-10-19 (night): PROBE BOOT VERIFIED on the GM1910
+- Three `fastboot boot shim/out/shim-boot.img` runs on the phone. **The live-FDT
+  report renders on the panel** - the ABL splash handover (0x9C000000, 1440x3120)
+  and the whole shim console path work on the OnePlus 7 Pro.
+- Run 1 froze after the report: the UFS register probe stalls the bus while ABL has
+  the host gated, and the watchdog reset the phone (~2 min). Fix: `PROBE_UFS 0` in
+  `shim/boards/guacamole.h` (sweet keeps 1) - the xnu UFS driver reports the same
+  state later.
+- Added a visible 180 s countdown (`PROBE idle Ns of 180s, then reset`) plus `con_at`
+  to console.c, so a probe run is self-documenting. Runs 2/3: countdown reaches ~170 s,
+  the shim's own reset fires (IMEM reason + PSCI SYSTEM_RESET), phone returns to
+  Android in ~3.5 min total, `sys.boot.reason = bootloader`.
+- Also fixed in `shim/probe.c`: per-node `#address-cells/#size-cells` inheritance
+  (Qualcomm `/soc` is 1 cell), live node names `qcom,gcc` / `ufsphy_mem` / `msm-eud`,
+  and the CPU reg length quirk (`/cpus` declares 1 cell but writes 2).
+- Boot/CI state: the repo is still local-only (3 commits unpushed; no token here);
+  the next step is the `machine_config=GUACAMOLE` CI build, then
+  `mkadt --device guacamole --highmem` (upper bank 0x180000000+4 GiB) + payload +
+  `fastboot boot` with `cpus=1`.
+
 ### 2026-10-19 (evening): GM1910 connected - live-FDT audit, probe image ready
 - Phone: OnePlus 7 Pro **GM1910** (China), OOS 12 `GM1910_11_H.40`, slot `_b`,
   **bootloader unlocked** (`ro.boot.flash.locked 0`, orange), Magisk root over adb.

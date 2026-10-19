@@ -6,12 +6,12 @@ runs the unmodified iPhone X iOS 16.7.16 userland, and keeps its HFS+ root
 inside the `userdata` partition.** Nothing about the userland, the ADT
 identity (`D22AP` / `iPhone10,3`) or the root image changes.
 
-Status: **port scaffold, hardware-audited; no kernel has been built or booted
-on a OnePlus 7 Pro yet.** The parameterization (ADT, shim, kernel machine
-config) is in place, a **probe boot image is built** (`shim/out/shim-boot.img`)
-and every *(verify)* value below was checked on a real GM1910 with
-`tools/fdt-audit.py` against the phone's own live FDT (see "Audited on the
-phone") - 20/20 match after the memory-layout fix.
+Status: **probe boot verified on a real OnePlus 7 Pro (2026-10-19).**
+The parameterization (ADT, shim, kernel machine config) is in place, the
+probe image boots from the stock ABL, takes over its splash framebuffer,
+renders the live-FDT report on the panel, counts down 180 s and resets
+cleanly back to Android. No XNU kernel has been built or booted on the
+device yet (`machine_config=GUACAMOLE` CI + payload are the next step).
 
 ## Where the device lives in the tree
 
@@ -69,6 +69,25 @@ that changed the scaffold:
   timer, UFS 0x1d84000 + PHY 0x1d87000, SPMI 0xc440000, usb0 a600000 +
   hsphy 88e2000 + QMP 88e8000, GCC 0x100000, IMEM 0x146bf000, PS_HOLD
   0xc264000, CPU MPIDRs 0x0..0x700) matched the scaffold as built.
+
+## Probe boot verified (2026-10-19)
+
+`fastboot boot shim/out/shim-boot.img` on the GM1910 (three runs):
+
+1. **Run 1** (with the UFS probe enabled): the report appeared on the panel -
+   this proves the whole display path (ABL continuous splash at 0x9C000000,
+   1440x3120) - but the screen then froze: reading the UFS host registers
+   stalls the bus while ABL has it gated, and the watchdog reset the phone.
+2. Fix: `PROBE_UFS 0` in `shim/boards/guacamole.h` (the xnu UFS driver
+   reports the same state later) plus a **visible 180 s countdown** so a
+   probe run is self-documenting.
+3. **Runs 2/3**: report renders, countdown ticks to ~170 s, then the shim's
+   own reset fires (IMEM restart reason + PSCI SYSTEM_RESET), the phone comes
+   back to Android in ~3.5 minutes total with `sys.boot.reason = bootloader`.
+
+Evidence: the countdown reaching 170 s (the full path ran), the panel showing
+the live-FDT values, and Android's recorded boot reason from the shim's IMEM
+write. Nothing is flashed; every run is a temporary `fastboot boot`.
 
 ## Board facts table
 

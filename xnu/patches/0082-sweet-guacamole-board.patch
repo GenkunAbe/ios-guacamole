@@ -270,10 +270,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..f6bbbe3
+index 0000000..facbd2f
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,709 @@
+@@ -0,0 +1,722 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -391,6 +391,8 @@ index 0000000..f6bbbe3
 +	unsigned sent, got, events;
 +	uint32_t irq_status, irq_last;
 +	bool probing;
++	int vreg_err, ack_err, id_err, sense_err, last_err;
++	uint8_t id[3];
 +	int x[TS_MAX_FINGERS], y[TS_MAX_FINGERS];
 +	bool down[TS_MAX_FINGERS];
 +} ts;
@@ -569,7 +571,9 @@ index 0000000..f6bbbe3
 +{
 +	ts.irq_status = ts.irq_last = 0;
 +	ts.sent = ts.got = 0;
-+	return ts_msg_run(addr, tx, nt, rx, nr, stretch);
++	int r = ts_msg_run(addr, tx, nt, rx, nr, stretch);
++	ts.last_err = r;
++	return r;
 +}
 +
 +/* sec_ts: 8-bit register pointer, then a repeated-start read. */
@@ -885,9 +889,9 @@ index 0000000..f6bbbe3
 +	ts_gpio(TS_PIN_IRQ, 0, 0, 3, false, false);   /* input, bias-disable, 8 mA */
 +	ts_gpio(TS_PIN_1V8, 0, 3, 3, true, true);     /* output high: 1v8 enable */
 +	ts_wait(1);
-+	int power_error = sweet_rpmh_vreg_enable(SWEET_DEV_TOUCH_VREG_NAME, SWEET_DEV_TOUCH_VREG_MV);
++	ts.vreg_err = sweet_rpmh_vreg_enable(SWEET_DEV_TOUCH_VREG_NAME, SWEET_DEV_TOUCH_VREG_MV);
 +	printf("SWEET TOUCH: vreg %s %u mV -> %d\n", SWEET_DEV_TOUCH_VREG_NAME,
-+	    SWEET_DEV_TOUCH_VREG_MV, power_error);
++	    SWEET_DEV_TOUCH_VREG_MV, ts.vreg_err);
 +	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, false);  /* reset asserted */
 +	ts_wait(5);
 +	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, true);   /* reset released */
@@ -899,13 +903,14 @@ index 0000000..f6bbbe3
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_I2C_SDA)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_I2C_SDA)));
 +
 +	ts.probing = true;
-+	int ack = ts_wait_ready(TS_ACK_BOOT_COMPLETE, 100);
-+	printf("SWEET TOUCH: boot-complete ack -> %d irq=%#x\n", ack, ts.irq_status);
++	ts.ack_err = ts_wait_ready(TS_ACK_BOOT_COMPLETE, 100);
++	printf("SWEET TOUCH: boot-complete ack -> %d irq=%#x\n", ts.ack_err, ts.irq_status);
 +
 +	uint8_t buf[16];
-+	int err = ts_read(TS_CMD_DEVICE_ID, buf, 3);
++	int err = ts_read(TS_CMD_DEVICE_ID, ts.id, 3);
++	ts.id_err = err;
 +	printf("SWEET TOUCH: device id err=%d %02x %02x %02x (devid %u)\n",
-+	    err, buf[0], buf[1], buf[2], (unsigned)((buf[1] << 8) | buf[2]));
++	    err, ts.id[0], ts.id[1], ts.id[2], (unsigned)((ts.id[1] << 8) | ts.id[2]));
 +
 +	uint8_t bs = 0;
 +	err = ts_read(TS_CMD_BOOT_STATUS, &bs, 1);
@@ -928,33 +933,41 @@ index 0000000..f6bbbe3
 +	/* Enable the touch function bit (word write) and start sensing. */
 +	err = ts_write_word(TS_CMD_TOUCH_FUNC, TS_MASK_TOUCH);
 +	printf("SWEET TOUCH: touch func -> %d\n", err);
-+	err = ts_cmd(TS_CMD_SENSE_ON);
-+	if (err) {
-+		printf("SWEET TOUCH: SENSE_ON failed %d\n", err);
++	ts.sense_err = ts_cmd(TS_CMD_SENSE_ON);
++	if (ts.sense_err) {
++		printf("SWEET TOUCH: SENSE_ON failed %d\n", ts.sense_err);
 +	} else {
 +		printf("SWEET TOUCH: SENSE_ON ok, polling at 10 ms\n");
 +	}
++	/* One line with everything: stays visible no matter how far the
++	 * console scrolls afterwards (reprinted every 10 s below). */
++	printf("SWEET TOUCH: state vreg=%d ack=%d id_err=%d id=%02x%02x%02x sense=%d events=%u\n",
++	    ts.vreg_err, ts.ack_err, ts.id_err, ts.id[0], ts.id[1], ts.id[2],
++	    ts.sense_err, ts.events);
 +
 +	unsigned errors = 0, ticks = 0;
-+	while (!ts.dead) {
-+		int r = ts_poll();
-+		if (r < 0) {
-+			if ((errors++ % 100u) == 0) {
-+				printf("SWEET TOUCH: poll err=%d irq=%#x status=%#x\n",
-+				    r, ts.irq_last, ts_rd(ts.se, SE_STATUS));
++	for (;;) {
++		if (!ts.dead) {
++			int r = ts_poll();
++			if (r < 0) {
++				if ((errors++ % 100u) == 0) {
++					printf("SWEET TOUCH: poll err=%d irq=%#x status=%#x\n",
++					    r, ts.irq_last, ts_rd(ts.se, SE_STATUS));
++				}
++				if (errors == 10u) {
++					ts_release_all();
++				}
++			} else {
++				errors = 0;
 +			}
-+			if (errors == 10u) {
-+				ts_release_all();
-+			}
-+		} else {
-+			errors = 0;
 +		}
-+		if ((++ticks % 1000u) == 0u) { /* every 10 s: loop alive */
-+			printf("SWEET TOUCH: alive events=%u\n", ts.events);
++		if ((++ticks % 1000u) == 0u) { /* every 10 s: always-visible state */
++			printf("SWEET TOUCH: state vreg=%d ack=%d id_err=%d id=%02x%02x%02x sense=%d events=%u dead=%d\n",
++			    ts.vreg_err, ts.ack_err, ts.id_err, ts.id[0], ts.id[1], ts.id[2],
++			    ts.sense_err, ts.events, ts.dead);
 +		}
 +		ts_wait(10);
 +	}
-+	ts_release_all();
 +out:
 +	(void)thread_terminate(current_thread());
 +	thread_block(THREAD_CONTINUE_NULL);

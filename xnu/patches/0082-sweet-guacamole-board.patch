@@ -14,6 +14,18 @@ index f2d8bf8..428469f 100644
  SWEET_PTHREAD_ROOT = $(SRCROOT)/bsd/pthread/sweet_libpthread
  SWEET_PTHREAD_INC = -I$(SWEET_PTHREAD_ROOT) -I$(SWEET_PTHREAD_ROOT)/private -I$(SWEET_PTHREAD_ROOT)/include
  sweet_pthread_init.o_INCFLAGS = $(SWEET_PTHREAD_INC)
+diff --git a/bsd/conf/files b/bsd/conf/files
+index 6630131..90d1a02 100644
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -108,6 +108,7 @@ bsd/dev/sweet_ufs.c			standard
+ bsd/dev/sweet_sample.c			standard
+ bsd/dev/sweet_keys.c			standard
+ bsd/dev/sweet_touch.c			standard
++bsd/dev/sweet_touch_sec.c		standard
+ bsd/dev/sweet_rpmh.c			standard
+ bsd/dev/sweet_spmi.c			standard
+ bsd/dev/sweet_usb.c			standard
 diff --git a/bsd/dev/sweet_keys.c b/bsd/dev/sweet_keys.c
 index a148608..ad97533 100644
 --- a/bsd/dev/sweet_keys.c
@@ -181,7 +193,7 @@ index 1981490..c8ea9d5 100644
  
  static vm_offset_t sp_core, sp_obs, sp_cfg;
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..723d314 100644
+index 03defe6..5bbddb8 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -5,7 +5,10 @@
@@ -225,7 +237,7 @@ index 03defe6..723d314 100644
  		printf("SWEET TOUCH: kernel_thread_start failed %d\n", kr);
  	}
  }
-+#elif defined(ARM64_BOARD_CONFIG_SWEET)
++#elif defined(ARM64_BOARD_CONFIG_SWEET) && !SWEET_DEV_TOUCH_SEC
 +/*
 + * No touch driver for this board yet: keeps the sweet_ufs.c call site happy.
 + * (sweet_touch_sec.c will replace this once the S6SY761 driver lands.)
@@ -237,6 +249,652 @@ index 03defe6..723d314 100644
 +	printf("SWEET TOUCH: no driver for this board yet\n");
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
+diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
+new file mode 100644
+index 0000000..394ac59
+--- /dev/null
++++ b/bsd/dev/sweet_touch_sec.c
+@@ -0,0 +1,640 @@
++/*
++ * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
++ * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
++ *
++ * Twin of sweet_touch.c: same GENI FIFO engine and same bring-up order, but
++ * the SM8150 GCC registers differ (wrap2 vote 0x52014 / RCG 0x1e148, TLMM at
++ * 0x03000000) and the IC speaks Samsung's sec_ts protocol (8-bit register
++ * pointer, 8-byte events, see mainline s6sy761.c and the vendor
++ * oplus_touchscreen/Samsung/S6SY761 driver for this exact board).
++ *
++ * The IC's rails: vdd_2v8 = PM8150 L17 (RPMh vote, 3008 mV), the 1.8 V
++ * digital rail is switched by TLMM gpio119 (active high), reset is gpio54
++ * and the interrupt line is gpio122 (all per the live device tree). The
++ * vendor order is 1v8 -> 1 ms -> 2v8 -> reset high -> 70 ms -> wait for the
++ * boot-complete event -> SENSE_ON; that is reproduced below.
++ *
++ * There is no serial port, so every step prints to the screen (film it).
++ * The SE firmware must already be loaded (ABL or a previous Android boot);
++ * ts_se_init verifies the I2C protocol revision and the 32-bit FIFOs.
++ */
++#include <pexpert/arm64/sweet_dev.h>
++
++#if defined(ARM64_BOARD_CONFIG_SWEET) && SWEET_DEV_TOUCH_SEC
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/errno.h>
++#include <kern/clock.h>
++#include <kern/thread.h>
++#include <kern/sched_prim.h>
++#include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
++
++extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
++/* Mach MIG declaration is not included by BSD's exported thread.h. */
++extern kern_return_t thread_terminate(thread_t);
++extern int sweet_rpmh_vreg_enable(const char *res, unsigned mv);
++extern void sweet_hid_touch(int finger, int down, int x, int y);
++void sweet_touch_init(void);
++
++/* SM8150 qupv3 wrap2 S0 = SE17 (GCC side). */
++#define TS_GCC_VOTE       SWEET_DEV_TOUCH_GCC_VOTE   /* 0x52014 */
++#define TS_VOTE_S0        (1u << 4)
++#define TS_VOTE_M_AHB     (1u << 2)
++#define TS_VOTE_S_AHB     (1u << 1)
++#define TS_GCC_RCG        SWEET_DEV_TOUCH_RCG        /* 0x1e148 clk src */
++
++/* GENI SE registers (same IP as sweet_touch.c). */
++#define SE_STATUS       0x040u
++#define SE_MCLK         0x048u
++#define SE_FW           0x068u
++#define SE_CLK_SEL      0x07cu
++#define SE_DMA          0x258u
++#define SE_TX_LEN       0x26cu
++#define SE_RX_LEN       0x270u
++#define SE_SCL          0x278u
++#define SE_CMD          0x600u
++#define SE_CTRL         0x604u
++#define SE_IRQ          0x610u
++#define SE_IRQ_EN       0x614u
++#define SE_IRQ_CLR      0x618u
++#define SE_TX           0x700u
++#define SE_RX           0x780u
++#define SE_TX_COUNT     0x800u
++#define SE_RX_COUNT     0x804u
++#define SE_HW_TX        0xe24u
++#define SE_HW_RX        0xe28u
++#define SE_TX_WM        0x80cu
++#define SE_RX_WM_IRQ    (1u << 26)
++#define SE_RX_LAST      (1u << 27)
++#define SE_TX_WM_IRQ    (1u << 30)
++#define SE_DONE         (1u << 0)
++#define SE_NACK         (1u << 10)
++#define SE_ERRORS       (0x3eu | (1u << 9) | (1u << 10) | (1u << 12) | \
++                         (1u << 13) | (3u << 24) | (3u << 28))
++#define SE_EVENTS       (SE_DONE | SE_ERRORS | SE_RX_WM_IRQ | SE_RX_LAST | SE_TX_WM_IRQ)
++/* geni_se_config_packing(8, 4, true, true, true): start bits 7/15/23/31,
++ * MSB-to-LSB, length 8, STOP only on vector 3. FIFO bytes remain LSB first. */
++#define SE_PACK0        0x0007f8feu
++#define SE_PACK1        0x000ffefeu
++
++/* sec_ts protocol (mainline s6sy761.c + vendor sec_drivers_s6sy761.h). */
++#define TS_ADDR             0x48u
++#define TS_EVENT_LEN        8u
++#define TS_CMD_SENSE_ON     0x10u
++#define TS_CMD_SENSE_OFF    0x11u
++#define TS_CMD_FW_INTEGRITY 0x21u
++#define TS_CMD_PANEL_INFO   0x23u
++#define TS_CMD_TOUCH_FUNC   0x30u
++#define TS_CMD_DEVICE_ID    0x52u
++#define TS_CMD_BOOT_STATUS  0x55u
++#define TS_CMD_READ_EVENT   0x60u      /* one event */
++#define TS_CMD_READ_ALL     0x61u      /* stacked events */
++#define TS_FW_OK            0x80u
++#define TS_BS_APPLICATION   0x20u
++#define TS_EVENT_INFO       0x02u
++#define TS_EVENT_VENDOR     0x07u
++#define TS_ACK_BOOT_COMPLETE 0x00u
++#define TS_MASK_TOUCH       0x01u
++#define TS_MAX_FINGERS      10u
++
++/* Touch pins on this board (live device tree: tp_1v8/tp_rst/tp_irq). */
++#define TS_PIN_RESET    54u
++#define TS_PIN_1V8      119u
++#define TS_PIN_IRQ      122u
++/* Common TLMM layout: ctl at +0, io (latch/level) at +4, 0x1000 per pin. */
++#define TS_GPIO_CFG(n)  ((uint32_t)(n) * 0x1000u)
++#define TS_GPIO_IO(n)   (TS_GPIO_CFG(n) + 4u)
++
++static struct {
++	vm_offset_t se, gcc, gpio;
++	bool started, dead;
++	unsigned sent, got;
++	uint32_t irq_status, irq_last;
++	bool probing;
++	int x[TS_MAX_FINGERS], y[TS_MAX_FINGERS];
++	bool down[TS_MAX_FINGERS];
++} ts;
++
++static uint32_t
++ts_rd(vm_offset_t base, uint32_t off)
++{
++	uint32_t v = *(volatile uint32_t *)(base + off);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return v;
++}
++
++static void
++ts_wr(vm_offset_t base, uint32_t off, uint32_t v)
++{
++	__asm__ volatile("dmb oshst" ::: "memory");
++	*(volatile uint32_t *)(base + off) = v;
++	__asm__ volatile("dsb osh" ::: "memory");
++}
++
++static bool
++ts_wait_clear(vm_offset_t base, uint32_t off, uint32_t mask)
++{
++	for (unsigned i = 0; i < 5000; ++i) {
++		if (!(ts_rd(base, off) & mask)) {
++			return true;
++		}
++		delay(1);
++	}
++	return false;
++}
++
++static void
++ts_wait(unsigned ms)
++{
++	uint64_t deadline;
++	clock_interval_to_deadline(ms, NSEC_PER_MSEC, &deadline);
++	(void)assert_wait_deadline(&ts, THREAD_UNINT, deadline);
++	thread_block(THREAD_CONTINUE_NULL);
++}
++
++/* mux 0 = GPIO, pull 0b11 = pull-up, drive 3 = 8 mA (as in sweet_touch.c). */
++static void
++ts_gpio(unsigned pin, unsigned mux, unsigned pull, unsigned drive, bool out, bool high)
++{
++	uint32_t off = TS_GPIO_CFG(pin);
++	uint32_t cfg = ts_rd(ts.gpio, off);
++	if (out) {
++		/* Latch the level before switching the pin to output. */
++		ts_wr(ts.gpio, TS_GPIO_IO(pin),
++		    (ts_rd(ts.gpio, TS_GPIO_IO(pin)) & ~2u) | (high ? 2u : 0u));
++	}
++	cfg &= ~0x3ffu;
++	cfg |= (mux << 2) | pull | (drive << 6) | (out ? 0x200u : 0u);
++	ts_wr(ts.gpio, off, cfg);
++}
++
++static uint32_t
++ts_irq(void)
++{
++	ts.irq_last = ts_rd(ts.se, SE_IRQ);
++	ts.irq_status |= ts.irq_last;
++	return ts.irq_last;
++}
++
++static void
++ts_abort(void)
++{
++	ts_wr(ts.se, SE_CTRL, 2); /* abort M command, release held bus */
++	bool done = false;
++	for (unsigned i = 0; i < 5000; ++i) {
++		if (ts_rd(ts.se, SE_IRQ) & (1u << 5)) {
++			done = true;
++			break;
++		}
++		delay(1);
++	}
++	if (!done || !ts_wait_clear(ts.se, SE_STATUS, 1u)) {
++		ts.dead = true;
++		printf("SWEET TOUCH: abort failed status=%#x irq=%#x; stopping\n",
++		    ts_rd(ts.se, SE_STATUS), ts_rd(ts.se, SE_IRQ));
++	}
++	/* Bound drain even if the hardware reports an impossible FIFO count. */
++	for (unsigned i = 0; i < 64 && (ts_rd(ts.se, SE_RX_COUNT) & 0x1ffffffu); ++i) {
++		(void)ts_rd(ts.se, SE_RX);
++	}
++	ts_wr(ts.se, SE_IRQ_CLR, 0xffffffffu);
++	if (ts_rd(ts.se, SE_TX_COUNT) & 0xfffffffu) {
++		ts.dead = true;
++		printf("SWEET TOUCH: TX FIFO not empty after abort; stopping\n");
++	}
++}
++
++/* One Linux-style FIFO message. TX is at most 4 bytes; RX at most 90. */
++static int
++ts_msg_run(uint8_t addr, const uint8_t *tx, unsigned nt, uint8_t *rx,
++    unsigned nr, bool stretch)
++{
++	if (ts.dead || nt > 4 || nr > 90 || (nt && nr) || (!nt && !nr)) {
++		return EIO;
++	}
++	if (!ts_wait_clear(ts.se, SE_STATUS, 1u)) {
++		ts.dead = true; /* no other SE17 owner is supported */
++		return EBUSY;
++	}
++	ts_wr(ts.se, SE_IRQ_CLR, 0xffffffffu);
++	ts_wr(ts.se, SE_TX_WM, nt ? 1u : 0u);
++	ts_wr(ts.se, nr ? SE_RX_LEN : SE_TX_LEN, nr ? nr : nt);
++	ts_wr(ts.se, SE_CMD, ((nr ? 2u : 1u) << 27) |
++	    ((uint32_t)addr << 9) | (stretch ? 4u : 0u));
++	int err = ETIMEDOUT;
++	for (unsigned i = 0; i < 20000; ++i) {
++		uint32_t irq = ts_irq();
++		if (irq & SE_ERRORS) {
++			err = (irq & SE_NACK) ? ENXIO : EIO;
++			/* A completed NACK is normal during address probing. Wait
++			 * for completion and leave a clean idle engine. */
++			for (unsigned j = 0; j < 5000 && !(irq & SE_DONE); ++j) {
++				delay(1);
++				irq = ts_irq();
++			}
++			if ((irq & SE_DONE) && !(ts_rd(ts.se, SE_STATUS) & 1u) &&
++			    !(ts_rd(ts.se, SE_TX_COUNT) & 0xfffffffu) &&
++			    !(ts_rd(ts.se, SE_RX_COUNT) & 0x1ffffffu)) {
++				ts_wr(ts.se, SE_IRQ_CLR, irq);
++				return err;
++			}
++			break;
++		}
++		if (nt && !ts.sent && (irq & SE_TX_WM_IRQ)) {
++			for (unsigned j = 0; j < nt; j += 4) {
++				uint32_t word = 0;
++				for (unsigned k = 0; k < 4 && j + k < nt; ++k) {
++					word |= (uint32_t)tx[j + k] << (8u * k);
++				}
++				ts_wr(ts.se, SE_TX, word);
++			}
++			ts.sent = nt;
++			ts_wr(ts.se, SE_TX_WM, 0);
++		}
++		uint32_t count = ts_rd(ts.se, SE_RX_COUNT) & 0x1ffffffu;
++		if (count > 64 || count > (nr - ts.got + 3u) / 4u) {
++			err = EIO;
++			break;
++		}
++		while (count--) {
++			uint32_t word = ts_rd(ts.se, SE_RX);
++			for (unsigned j = 0; j < 4 && ts.got < nr; ++j) {
++				rx[ts.got++] = (uint8_t)(word >> (8u * j));
++			}
++		}
++		/* DONE is checked after draining RX, so final short words aren't lost. */
++		if (irq & SE_DONE) {
++			/* Re-sample after the final drain; a late error must beat DONE. */
++			irq = ts_irq();
++			if (irq & SE_ERRORS) {
++				continue;
++			}
++			ts_wr(ts.se, SE_IRQ_CLR, irq);
++			if (ts.got == nr && ts.sent == nt) {
++				return 0;
++			}
++			err = EIO;
++			break;
++		}
++		/* Preserve DONE/errors if they arrive during this iteration. */
++		ts_wr(ts.se, SE_IRQ_CLR, irq & (SE_RX_WM_IRQ | SE_RX_LAST | SE_TX_WM_IRQ));
++		delay(1);
++	}
++	ts_abort();
++	return err;
++}
++
++static int
++ts_msg(uint8_t addr, const uint8_t *tx, unsigned nt, uint8_t *rx, unsigned nr, bool stretch)
++{
++	ts.irq_status = ts.irq_last = 0;
++	ts.sent = ts.got = 0;
++	return ts_msg_run(addr, tx, nt, rx, nr, stretch);
++}
++
++/* sec_ts: 8-bit register pointer, then a repeated-start read. */
++static int
++ts_read(uint8_t reg, uint8_t *buf, unsigned len)
++{
++	int err = ts_msg(TS_ADDR, &reg, 1u, NULL, 0, true);
++	if (err) {
++		return err;
++	}
++	return ts_msg(TS_ADDR, NULL, 0, buf, len, false);
++}
++
++/* One-byte command (SENSE_ON and friends). */
++static int
++ts_cmd(uint8_t reg)
++{
++	return ts_msg(TS_ADDR, &reg, 1u, NULL, 0, false);
++}
++
++static int
++ts_write_reg(uint8_t reg, uint8_t val)
++{
++	uint8_t t[2] = {reg, val};
++	return ts_msg(TS_ADDR, t, 2u, NULL, 0, false);
++}
++
++/* 16-bit little-endian payload (i2c_smbus_write_word_data style). */
++static int
++ts_write_word(uint8_t reg, uint16_t val)
++{
++	uint8_t t[3] = {reg, (uint8_t)val, (uint8_t)(val >> 8)};
++	return ts_msg(TS_ADDR, t, 3u, NULL, 0, false);
++}
++
++/* Vote the wrap2 branches and put SE17's clock source on XO/1 (19.2 MHz). */
++static bool
++ts_clocks(void)
++{
++	ts_wr(ts.gcc, TS_GCC_VOTE,
++	    ts_rd(ts.gcc, TS_GCC_VOTE) | TS_VOTE_S0 | TS_VOTE_M_AHB | TS_VOTE_S_AHB);
++	uint32_t dfs = ts_rd(ts.gcc, TS_GCC_RCG + 0x14u);
++	uint32_t cfg = ts_rd(ts.gcc, TS_GCC_RCG + 4u);
++	printf("SWEET TOUCH: gcc vote=%#x rcg=%#x cfg=%#x dfs=%#x\n",
++	    ts_rd(ts.gcc, TS_GCC_VOTE), ts_rd(ts.gcc, TS_GCC_RCG), cfg, dfs);
++	if (dfs & 1u) {
++		/* SE CLK_SEL=0 selects DFS performance level 0. Do not alter tables. */
++		cfg = ts_rd(ts.gcc, TS_GCC_RCG + 0x1cu);
++		if ((cfg & 0x371fu) != 1u) {
++			printf("SWEET TOUCH: DFS level0=%#x is not XO/1; need clock integration\n", cfg);
++			return false;
++		}
++	} else {
++		/* XO parent 0, HID divider 1 => 19.2 MHz. No PLL or voltage change. */
++		cfg = (cfg & ~(0x371fu | (1u << 20))) | 1u;
++		ts_wr(ts.gcc, TS_GCC_RCG + 4u, cfg);
++		ts_wr(ts.gcc, TS_GCC_RCG, ts_rd(ts.gcc, TS_GCC_RCG) | 1u);
++		if (!ts_wait_clear(ts.gcc, TS_GCC_RCG, 1u)) {
++			printf("SWEET TOUCH: RCG update timeout\n");
++			return false;
++		}
++	}
++	const uint32_t branches[] = {0x1e004, 0x1e008, 0x1e00c, 0x1e010, 0x1e144};
++	for (unsigned i = 0; i < sizeof(branches) / sizeof(branches[0]); ++i) {
++		if (!ts_wait_clear(ts.gcc, branches[i], 1u << 31)) {
++			printf("SWEET TOUCH: GCC branch %#x halted (%#x)\n", branches[i],
++			    ts_rd(ts.gcc, branches[i]));
++			return false;
++		}
++	}
++	return true;
++}
++
++static bool
++ts_se_init(void)
++{
++	uint32_t fw = ts_rd(ts.se, SE_FW);
++	uint32_t tx = ts_rd(ts.se, SE_HW_TX), rx = ts_rd(ts.se, SE_HW_RX);
++	printf("SWEET TOUCH: se17 fw=%#x proto=%u status=%#x tx=%#x rx=%#x ios=%#x\n",
++	    fw, (fw >> 8) & 0xffu, ts_rd(ts.se, SE_STATUS), tx, rx,
++	    ts_rd(ts.se, 0x908));
++	if (((fw >> 8) & 0xffu) != 3u || (ts_rd(ts.se, 0x64) & 1u) ||
++	    ((tx >> 24) & 0x3fu) != 32u || ((rx >> 24) & 0x3fu) != 32u ||
++	    ((tx >> 16) & 0x3fu) < 2u || ((rx >> 16) & 0x3fu) < 2u) {
++		printf("SWEET TOUCH: need ABL-loaded I2C firmware and 32-bit FIFOs; probes skipped\n");
++		return false;
++	}
++	if (ts_rd(ts.se, SE_STATUS) & 0x1001u) {
++		printf("SWEET TOUCH: SE17 already busy; probes skipped\n");
++		return false;
++	}
++	ts_wr(ts.se, 0xe18, 0); /* no GSI events */
++	ts_wr(ts.se, 0xe1c, 0); /* mask external IRQ routing; poll local status */
++	ts_wr(ts.se, 0x644, 0);
++	ts_wr(ts.se, SE_IRQ_CLR, 0xffffffffu);
++	ts_wr(ts.se, 0x648, 0xffffffffu);
++	ts_wr(ts.se, SE_DMA, 0);
++	ts_wr(ts.se, 0x28, ts_rd(ts.se, 0x28) | 0x7fu);
++	ts_wr(ts.se, 0xe30, ts_rd(ts.se, 0xe30) | 0x0fu);
++	ts_wr(ts.se, 0x24, 0x7f);
++	ts_wr(ts.se, 0x20, 1);
++	ts_wr(ts.se, SE_CLK_SEL, 0);
++	ts_wr(ts.se, SE_MCLK, (7u << 4) | 1u);
++	ts_wr(ts.se, SE_SCL, (10u << 20) | (11u << 10) | 26u); /* 100 kHz */
++	/* Linux 8-bit I2C packing: MSB on the wire, LSB byte first in FIFO. */
++	ts_wr(ts.se, 0x254, 0);
++	ts_wr(ts.se, 0x260, SE_PACK0);
++	ts_wr(ts.se, 0x264, SE_PACK1);
++	ts_wr(ts.se, 0x284, SE_PACK0);
++	ts_wr(ts.se, 0x288, SE_PACK1);
++	ts_wr(ts.se, SE_TX_WM, 0);
++	ts_wr(ts.se, 0x810, 0);
++	ts_wr(ts.se, 0x814, ((rx >> 16) & 0x3fu) - 1u);
++	ts_wr(ts.se, SE_IRQ_EN, SE_EVENTS);
++	printf("SWEET TOUCH: packing tx=%#x/%#x rx=%#x/%#x gran=%#x\n",
++	    ts_rd(ts.se, 0x260), ts_rd(ts.se, 0x264),
++	    ts_rd(ts.se, 0x284), ts_rd(ts.se, 0x288), ts_rd(ts.se, 0x254));
++	if (ts_rd(ts.se, 0x260) != SE_PACK0 || ts_rd(ts.se, 0x264) != SE_PACK1 ||
++	    ts_rd(ts.se, 0x284) != SE_PACK0 || ts_rd(ts.se, 0x288) != SE_PACK1 ||
++	    ts_rd(ts.se, 0x254) != 0) {
++		printf("SWEET TOUCH: packing readback mismatch; probes skipped\n");
++		return false;
++	}
++	if ((ts_rd(ts.se, SE_TX_COUNT) & 0xfffffffu) ||
++	    (ts_rd(ts.se, SE_RX_COUNT) & 0x1ffffffu)) {
++		printf("SWEET TOUCH: inherited FIFO data; probes skipped\n");
++		return false;
++	}
++	return true;
++}
++
++/* Read events until the requested information ACK shows up (vendor logic). */
++static int
++ts_wait_ready(unsigned ack, unsigned retry_cnt)
++{
++	uint8_t ev[TS_EVENT_LEN] = {0,};
++	int retry = 0;
++
++	while (ts_read(TS_CMD_READ_EVENT, ev, sizeof(ev)) == 0) {
++		unsigned status = (ev[0] >> 2) & 0xfu;
++		if (((status == TS_EVENT_INFO) || (status == TS_EVENT_VENDOR)) &&
++		    ev[1] == (uint8_t)ack) {
++			return 0;
++		}
++		if (++retry > (int)retry_cnt) {
++			printf("SWEET TOUCH: wait ack %#x timeout, event %02x %02x %02x %02x %02x %02x %02x %02x\n",
++			    ack, ev[0], ev[1], ev[2], ev[3], ev[4], ev[5], ev[6], ev[7]);
++			break;
++		}
++		ts_wait(20);
++	}
++	return -1;
++}
++
++/* One event buffer; returns 1 when a frame was forwarded. */
++static int
++ts_handle_event(const uint8_t *ev)
++{
++	if (!ev[0]) {
++		return 0;
++	}
++	unsigned eid = ev[0] & 0x03u;
++	if (eid != 0u) {
++		return 0; /* status / information / vendor event */
++	}
++	unsigned tid_raw = (ev[0] & 0x3cu) >> 2;
++	if (!tid_raw || tid_raw > TS_MAX_FINGERS) {
++		return 0;
++	}
++	unsigned id = tid_raw - 1u;
++	unsigned state = (ev[0] & 0xc0u) >> 6;
++	int x = (int)(((unsigned)ev[1] << 4) | (((unsigned)ev[3] & 0xf0u) >> 4));
++	int y = (int)(((unsigned)ev[2] << 4) | ((unsigned)ev[3] & 0x0fu));
++	switch (state) {
++	case 1: /* press */
++	case 2: /* move */
++		ts.x[id] = x;
++		ts.y[id] = y;
++		ts.down[id] = true;
++		sweet_hid_touch((int)id, 1, x, y);
++		return 1;
++	case 3: /* release */
++		if (ts.down[id]) {
++			ts.down[id] = false;
++			sweet_hid_touch((int)id, 0, ts.x[id], ts.y[id]);
++		}
++		return 1;
++	default: /* S6SY761_TS_NONE */
++		return 0;
++	}
++}
++
++/* Poll the event stack: one event, then as many as the IC reports waiting. */
++static int
++ts_poll(void)
++{
++	uint8_t ev[TS_EVENT_LEN];
++	int err = ts_read(TS_CMD_READ_EVENT, ev, sizeof(ev));
++	if (err) {
++		return err;
++	}
++	int handled = ts_handle_event(ev);
++	unsigned left = ev[7] & 0x3fu;
++	if (left) {
++		uint8_t stack[TS_MAX_FINGERS * TS_EVENT_LEN];
++		if (left > TS_MAX_FINGERS) {
++			left = TS_MAX_FINGERS;
++		}
++		if (ts_read(TS_CMD_READ_ALL, stack, left * TS_EVENT_LEN) == 0) {
++			for (unsigned i = 0; i < left; ++i) {
++				handled += ts_handle_event(&stack[i * TS_EVENT_LEN]);
++			}
++		}
++	}
++	return handled;
++}
++
++static void
++ts_release_all(void)
++{
++	for (unsigned i = 0; i < TS_MAX_FINGERS; ++i) {
++		if (ts.down[i]) {
++			ts.down[i] = false;
++			sweet_hid_touch((int)i, 0, ts.x[i], ts.y[i]);
++		}
++	}
++}
++
++static void
++ts_thread(void *arg __unused, wait_result_t wr __unused)
++{
++	unsigned delay_s = 20;
++	(void)PE_parse_boot_argn("sweettouchdelay", &delay_s, sizeof(delay_s));
++	printf("SWEET TOUCH: starting in %u s\n", delay_s);
++	ts_wait(delay_s * 1000u);
++
++	printf("SWEET TOUCH: mapping GCC/TLMM/SE17\n");
++	ts.gcc = ml_io_map(SWEET_DEV_TOUCH_GCC_PA, 0x100000);
++	ts.gpio = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA, 0x100000);
++	ts.se = ml_io_map(SWEET_DEV_TOUCH_SE_PA, 0x4000);
++	if (!ts.gcc || !ts.gpio || !ts.se) {
++		printf("SWEET TOUCH: MMIO mapping failed\n");
++		goto out;
++	}
++	if (!ts_clocks() || !ts_se_init()) {
++		goto out;
++	}
++
++	printf("SWEET TOUCH: pins reset=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x\n",
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_RESET)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_RESET)),
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_1V8)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_1V8)),
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)));
++
++	/* Vendor power order: 1v8 enable, 1 ms, 2v8 rail, reset high, 70 ms. */
++	ts_gpio(TS_PIN_IRQ, 0, 0, 3, false, false);   /* input, bias-disable, 8 mA */
++	ts_gpio(TS_PIN_1V8, 0, 3, 3, true, true);     /* output high: 1v8 enable */
++	ts_wait(1);
++	int power_error = sweet_rpmh_vreg_enable(SWEET_DEV_TOUCH_VREG_NAME, SWEET_DEV_TOUCH_VREG_MV);
++	printf("SWEET TOUCH: vreg %s %u mV -> %d\n", SWEET_DEV_TOUCH_VREG_NAME,
++	    SWEET_DEV_TOUCH_VREG_MV, power_error);
++	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, false);  /* reset asserted */
++	ts_wait(5);
++	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, true);   /* reset released */
++	ts_wait(70);
++
++	ts.probing = true;
++	int ack = ts_wait_ready(TS_ACK_BOOT_COMPLETE, 100);
++	printf("SWEET TOUCH: boot-complete ack -> %d irq=%#x\n", ack, ts.irq_status);
++
++	uint8_t buf[16];
++	int err = ts_read(TS_CMD_DEVICE_ID, buf, 3);
++	printf("SWEET TOUCH: device id err=%d %02x %02x %02x (devid %u)\n",
++	    err, buf[0], buf[1], buf[2], (unsigned)((buf[1] << 8) | buf[2]));
++
++	uint8_t bs = 0;
++	err = ts_read(TS_CMD_BOOT_STATUS, &bs, 1);
++	printf("SWEET TOUCH: boot status err=%d %02x (want %02x)\n", err, bs, TS_BS_APPLICATION);
++
++	uint8_t fw = 0;
++	err = ts_read(TS_CMD_FW_INTEGRITY, &fw, 1);
++	printf("SWEET TOUCH: fw integrity err=%d %02x (want %02x)\n", err, fw, TS_FW_OK);
++
++	err = ts_read(TS_CMD_PANEL_INFO, buf, 11);
++	if (!err) {
++		printf("SWEET TOUCH: panel max_x=%u max_y=%u tx=%u\n",
++		    (unsigned)((buf[0] << 8) | buf[1]), (unsigned)((buf[2] << 8) | buf[3]),
++		    buf[8] ? buf[8] : 1u);
++	} else {
++		printf("SWEET TOUCH: panel info err=%d\n", err);
++	}
++	ts.probing = false;
++
++	/* Enable the touch function bit (word write) and start sensing. */
++	err = ts_write_word(TS_CMD_TOUCH_FUNC, TS_MASK_TOUCH);
++	printf("SWEET TOUCH: touch func -> %d\n", err);
++	err = ts_cmd(TS_CMD_SENSE_ON);
++	if (err) {
++		printf("SWEET TOUCH: SENSE_ON failed %d\n", err);
++	} else {
++		printf("SWEET TOUCH: SENSE_ON ok, polling at 10 ms\n");
++	}
++
++	unsigned errors = 0;
++	while (!ts.dead) {
++		int r = ts_poll();
++		if (r < 0) {
++			if ((errors++ % 100u) == 0) {
++				printf("SWEET TOUCH: poll err=%d irq=%#x status=%#x\n",
++				    r, ts.irq_last, ts_rd(ts.se, SE_STATUS));
++			}
++			if (errors == 10u) {
++				ts_release_all();
++			}
++		} else {
++			errors = 0;
++		}
++		ts_wait(10);
++	}
++	ts_release_all();
++out:
++	(void)thread_terminate(current_thread());
++	thread_block(THREAD_CONTINUE_NULL);
++}
++
++void
++sweet_touch_init(void)
++{
++	int enabled = 1;
++	thread_t thread;
++
++	if (ts.started) {
++		return;
++	}
++	ts.started = true;
++	(void)PE_parse_boot_argn("sweettouch", &enabled, sizeof(enabled));
++	if (!enabled) {
++		printf("SWEET TOUCH: disabled (sweettouch=0)\n");
++		return;
++	}
++	kern_return_t kr = kernel_thread_start(ts_thread, NULL, &thread);
++	if (kr == KERN_SUCCESS) {
++		thread_deallocate(thread);
++	} else {
++		printf("SWEET TOUCH: kernel_thread_start failed %d\n", kr);
++	}
++}
++#endif /* ARM64_BOARD_CONFIG_SWEET && SWEET_DEV_TOUCH_SEC */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
 index b6c1a41..da94a1b 100644
 --- a/bsd/dev/sweet_usb.c
@@ -1113,7 +1771,7 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..410c7ec
+index 0000000..a822961
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
 @@ -0,0 +1,171 @@
@@ -1199,8 +1857,8 @@ index 0000000..410c7ec
 +#define SWEET_DEV_TOUCH_SE_PA   0x00c80000u
 +#define SWEET_DEV_TOUCH_GCC_PA  0x00100000u
 +#define SWEET_DEV_TOUCH_NORTH_PA 0x03000000u     /* live tree pinctrl@03000000 */
-+#define SWEET_DEV_TOUCH_GCC_VOTE 0x5200cu        /* VERIFY: GCC SE17 vote offset */
-+#define SWEET_DEV_TOUCH_RCG     0x18148u         /* VERIFY: wrapper1 S17 divider */
++#define SWEET_DEV_TOUCH_GCC_VOTE 0x52014u        /* qupv3 wrap2 CBCR (branch vote) */
++#define SWEET_DEV_TOUCH_RCG     0x1e148u         /* qupv3 wrap2 s0 clk src (cmd_rcgr) */
 +
 +/* USB: usb0 = ssusb@a600000 (dwc3@a600000, 0xcd00) + hsphy@88e2000 (HS,
 + * 0x110) + ssphy@88e8000 (QMP USB3/DP, 0x3000, vdd pm8150_l18) +

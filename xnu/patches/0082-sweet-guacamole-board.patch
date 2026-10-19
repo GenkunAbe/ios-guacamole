@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..06a730e 100644
+index b6c1a41..91fbf3e 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -455,28 +455,32 @@ index b6c1a41..06a730e 100644
  #define DEPCMD_SETEPCONFIG      1
  #define DEPCMD_SETTRANSFRESOURCE 2
  #define DEPCMD_SETSTALL         4
-@@ -296,16 +387,20 @@ ud_start_trb(unsigned ep, uint32_t trb, uint32_t buf, uint32_t len, uint32_t ctl
+@@ -296,16 +387,24 @@ ud_start_trb(unsigned ep, uint32_t trb, uint32_t buf, uint32_t len, uint32_t ctl
  	volatile uint32_t *t = (volatile uint32_t *)(ud.dma + trb);
  	uint64_t bpa = ud.dma_pa + buf;
  
++	printf("SWEET USB:     trb: stores\n");
 +	usb_mark(SWEET_USB_MARK_TRB_WRITE);
  	t[0] = (uint32_t)bpa;
  	t[1] = (uint32_t)(bpa >> 32);
  	t[2] = len;
  	t[3] = ctl | TRB_HWO | TRB_LST | TRB_ISP_IMI | TRB_IOC;
++	printf("SWEET USB:     trb: cache sync (pa 0x%llx len %u)\n", (uint64_t)(ud.dma_pa + trb), 16);
 +	usb_mark(SWEET_USB_MARK_TRB_SYNC);
  	ud_sync(trb, 16);
  	if (len) {
  		ud_sync(buf, len);
  	}
++	printf("SWEET USB:     trb: DEPCMD STARTTRANSFER (tpa 0x%llx)\n", (uint64_t)(ud.dma_pa + trb));
 +	usb_mark(SWEET_USB_MARK_TRB_CMD);
  	uint64_t tpa = ud.dma_pa + trb;
  	ud_epcmd(ep, DEPCMD_STARTTRANSFER, (uint32_t)(tpa >> 32), (uint32_t)tpa, 0);
++	printf("SWEET USB:     trb: done\n");
 +	usb_mark(SWEET_USB_MARK_TRB_WAIT);
  }
  
  static void
-@@ -854,6 +949,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -854,6 +953,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	thread_t thread;
  
  	ud.dwc = dwc;
@@ -484,7 +488,7 @@ index b6c1a41..06a730e 100644
  	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
  	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
  		printf("SWEET USB: no DMA memory\n");
-@@ -867,6 +963,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -867,6 +967,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	ud_if_create();
  
  	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
@@ -492,7 +496,7 @@ index b6c1a41..06a730e 100644
  	dwc_wr(DCTL, DCTL_CSFTRST);
  	int i;
  	for (i = 0; i < 500 && (dwc_rd(DCTL) & DCTL_CSFTRST); i++) {
-@@ -878,6 +975,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -878,6 +979,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		return;
  	}
  
@@ -500,7 +504,7 @@ index b6c1a41..06a730e 100644
  	dwc_wr(GEVNTADRLO, (uint32_t)(ud.dma_pa + UD_EVT));
  	dwc_wr(GEVNTADRHI, (uint32_t)((ud.dma_pa + UD_EVT) >> 32));
  	dwc_wr(GEVNTSIZ, (1u << 31) | UD_EVT_SIZE);     /* interrupt masked: polled */
-@@ -890,6 +988,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -890,6 +992,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	/* Events: disconnect, USB reset, connect done */
  	dwc_wr(DEVTEN, 0x7);
  
@@ -508,7 +512,7 @@ index b6c1a41..06a730e 100644
  	/* Endpoint 0 OUT/IN: start config, control type, max packet 512 until connect done. */
  	if (ud_epcmd(0, DEPCMD_DEPSTARTCFG, 0, 0, 0) ||
  	    ud_epcmd(0, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (0u << 25), 0) ||
-@@ -899,26 +998,66 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -899,26 +1002,66 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		printf("SWEET USB: endpoint 0 setup failed\n");
  		return;
  	}
@@ -581,7 +585,7 @@ index b6c1a41..06a730e 100644
  	if (kernel_thread_start(ud_thread, NULL, &thread) == KERN_SUCCESS) {
  		thread_deallocate(thread);
  	}
-@@ -928,4 +1067,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -928,4 +1071,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		thread_deallocate(thread);
  	}
  }

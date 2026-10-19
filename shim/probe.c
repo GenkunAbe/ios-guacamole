@@ -452,8 +452,18 @@ static void
 probe_tlmm(void)
 {
 	volatile uint32_t *t = (volatile uint32_t *)(uintptr_t)BOARD_TLMM_PA;
-#define TLMM_CTL(pin)	t[((pin) * 0x1000u) / 4u]
-#define TLMM_IO(pin)	t[((pin) * 0x1000u) / 4u + 1u]
+	/* SM8150 has four tile arrays inside the region; see sweet_touch_sec.c. */
+#define TLMM_TILE(pin)	(((pin) <= 7 || (pin) == 38 || ((pin) >= 51 && (pin) <= 82) || \
+			  ((pin) >= 98 && (pin) <= 101) || ((pin) >= 114 && (pin) <= 124) || \
+			  ((pin) >= 126 && (pin) <= 154)) ? 0x00d00000u : \
+			 (((pin) >= 8 && (pin) <= 20) || ((pin) >= 31 && (pin) <= 37) || \
+			  ((pin) >= 39 && (pin) <= 42) || ((pin) >= 83 && (pin) <= 86) || \
+			  ((pin) >= 88 && (pin) <= 97) || ((pin) >= 102 && (pin) <= 104) || \
+			  (pin) >= 169) ? 0x00900000u : \
+			 (((pin) >= 21 && (pin) <= 30) || ((pin) >= 43 && (pin) <= 50) || \
+			  (pin) == 87) ? 0x00500000u : 0x00100000u)
+#define TLMM_CTL(pin)	t[(TLMM_TILE(pin) + (pin) * 0x1000u) / 4u]
+#define TLMM_IO(pin)	t[(TLMM_TILE(pin) + (pin) * 0x1000u) / 4u + 1u]
 	static const unsigned touch_pins[] = {54, 55, 56, 119, 122};
 
 	for (unsigned i = 0; i < 5; ++i) {
@@ -478,6 +488,7 @@ probe_tlmm(void)
 	con_hex2("TLMM wr", "old=", before, "new=", after);
 #undef TLMM_CTL
 #undef TLMM_IO
+#undef TLMM_TILE
 }
 
 void

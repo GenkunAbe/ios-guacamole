@@ -92,6 +92,20 @@
 - USB code now has: `sweetusbstep=N` (stop before step N), `sweetvbus=0..3`, event-driven
   arm, per-step prints, and the `sweetusb=1` read-only state probe with the correct PHY
   registers.
+- **Touch bring-up log (guacamole S6SY761), first boot 2026-10-19 evening.** The driver
+  reached the clock step and bailed with "GCC branch 0x1e0xx halted". Root cause: the
+  branch check list was copied from sweet's SM6150 driver (`0x18004/0x18008/0x1800c/
+  0x18010/0x18144`) and blindly shifted to the wrap2 range. On SM8150 only
+  `0x1e004` (m_ahb), `0x1e008` (s_ahb) and `0x1e144` (s0) are wrap2 clock registers
+  (mainline and the vendor gcc-sm8150 agree); `0x1e00c`/`0x1e010` belong to no clock and
+  read back with bit 31 set, which aborted the probe before any SE access (no EDL, no
+  SE/IC prints - consistent with the code path). The status semantics are
+  `clk_branch2_check_halt`: CLK_OFF bit 31 clear, or NOC FSM bits 30:28 == 0b010, and the
+  s_ahb branch has a hardware clock gating bit (0x1e008 bit 1) that skips the check.
+  Verified GCC facts for SE17: wrap2 = `qcom,qupv3_2_geni_se@cc0000`, se-clk =
+  GCC_QUPV3_WRAP2_S0_CLK (0x52014 BIT(4)), m-ahb BIT(2), s-ahb BIT(1), RCG cmd 0x1e148.
+  The driver now prints each branch value with a tag (ok/fsm-on/hwcg/HALTED) and
+  `sweetforce=1` proceeds when one still reads halted.
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

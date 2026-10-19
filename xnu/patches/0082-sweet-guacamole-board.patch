@@ -251,10 +251,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..67915bf
+index 0000000..e15b1f8
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,689 @@
+@@ -0,0 +1,696 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -659,23 +659,29 @@ index 0000000..67915bf
 +	return true;
 +}
 +
++/*
++ * Everything here is advisory: the SE register block reads fine even when the
++ * engine is not ready, so an early bail-out costs a test cycle while the first
++ * real I2C transaction tells the whole truth (NACK vs timeout vs garbled data).
++ * The only repair attempted is a leftover-command abort.
++ */
 +static bool
 +ts_se_init(void)
 +{
 +	uint32_t fw = ts_rd(ts.se, SE_FW);
 +	uint32_t tx = ts_rd(ts.se, SE_HW_TX), rx = ts_rd(ts.se, SE_HW_RX);
++	uint32_t status = ts_rd(ts.se, SE_STATUS);
 +	printf("SWEET TOUCH: se17 fw=%#x proto=%u status=%#x tx=%#x rx=%#x ios=%#x\n",
-+	    fw, (fw >> 8) & 0xffu, ts_rd(ts.se, SE_STATUS), tx, rx,
-+	    ts_rd(ts.se, 0x908));
-+	if (((fw >> 8) & 0xffu) != 3u || (ts_rd(ts.se, 0x64) & 1u) ||
-+	    ((tx >> 24) & 0x3fu) != 32u || ((rx >> 24) & 0x3fu) != 32u ||
-+	    ((tx >> 16) & 0x3fu) < 2u || ((rx >> 16) & 0x3fu) < 2u) {
-+		printf("SWEET TOUCH: need ABL-loaded I2C firmware and 32-bit FIFOs; probes skipped\n");
-+		return false;
++	    fw, (fw >> 8) & 0xffu, status, tx, rx, ts_rd(ts.se, 0x908));
++	printf("SWEET TOUCH: se17 fifo tx=%u/%u rx=%u/%u gran=%#x st2=%#x\n",
++	    (tx >> 24) & 0x3fu, (tx >> 16) & 0x3fu,
++	    (rx >> 24) & 0x3fu, (rx >> 16) & 0x3fu,
++	    ts_rd(ts.se, 0x254), ts_rd(ts.se, 0x64));
++	if (((fw >> 8) & 0xffu) != 3u) {
++		printf("SWEET TOUCH: SE17 does not report the I2C protocol; probing anyway\n");
 +	}
-+	if (ts_rd(ts.se, SE_STATUS) & 0x1001u) {
-+		printf("SWEET TOUCH: SE17 already busy; probes skipped\n");
-+		return false;
++	if (status & 0x1001u) {
++		printf("SWEET TOUCH: SE17 status has pending bits (%#x)\n", status);
 +	}
 +	ts_wr(ts.se, 0xe18, 0); /* no GSI events */
 +	ts_wr(ts.se, 0xe1c, 0); /* mask external IRQ routing; poll local status */
@@ -706,13 +712,14 @@ index 0000000..67915bf
 +	if (ts_rd(ts.se, 0x260) != SE_PACK0 || ts_rd(ts.se, 0x264) != SE_PACK1 ||
 +	    ts_rd(ts.se, 0x284) != SE_PACK0 || ts_rd(ts.se, 0x288) != SE_PACK1 ||
 +	    ts_rd(ts.se, 0x254) != 0) {
-+		printf("SWEET TOUCH: packing readback mismatch; probes skipped\n");
-+		return false;
++		printf("SWEET TOUCH: packing readback mismatch; probing anyway\n");
 +	}
-+	if ((ts_rd(ts.se, SE_TX_COUNT) & 0xfffffffu) ||
-+	    (ts_rd(ts.se, SE_RX_COUNT) & 0x1ffffffu)) {
-+		printf("SWEET TOUCH: inherited FIFO data; probes skipped\n");
-+		return false;
++	uint32_t txc = ts_rd(ts.se, SE_TX_COUNT) & 0xffffffu;
++	uint32_t rxc = ts_rd(ts.se, SE_RX_COUNT) & 0x1ffffffu;
++	if (txc || rxc) {
++		printf("SWEET TOUCH: inherited FIFO data tx=%#x rx=%#x; aborting\n", txc, rxc);
++		ts_abort();
++		ts.dead = false; /* the first real transaction is the judge */
 +	}
 +	return true;
 +}

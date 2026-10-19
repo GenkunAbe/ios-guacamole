@@ -37,3 +37,8 @@
  * registers while ABL has it gated stalls the bus and the watchdog resets
  * the phone (observed 2026-10-19). The xnu driver reports UFS state later. */
 #define PROBE_UFS		0
+
+/* Reset-surviving scratch word (DRAM, 0x18000000 into the kernel bank):
+ * the kernel's USB gadget writes its progress marker here and the shim
+ * prints it before jumping (see pexpert/pexpert/arm64/sweet_dev.h). */
+#define MARK_PA			0x198000000UL

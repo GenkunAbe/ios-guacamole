@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..070b56a 100644
+index b6c1a41..06a730e 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -313,7 +313,7 @@ index b6c1a41..070b56a 100644
  #define QUSB2_SIZE              0x00000400
  
  static uint32_t
-@@ -73,6 +90,70 @@ usb_rd(vm_offset_t base, uint32_t off)
+@@ -73,6 +90,76 @@ usb_rd(vm_offset_t base, uint32_t off)
  	return v;
  }
  
@@ -323,8 +323,14 @@ index b6c1a41..070b56a 100644
 + * (the probe prints it; the shim can print it even earlier). Offset 0x8f0 is
 + * not used by any child of qcom,msm-imem@146bf000 in the live FDT.
 + */
-+#define SWEET_USB_IMEM_PA    0x146bf000UL
-+#define SWEET_USB_IMEM_MARK  0x8f0u
++/*
++ * Progress markers for the gadget bring-up survive a reset in DRAM: warm
++ * resets keep DRAM contents and the bootloader does not touch this address
++ * (0x18000000 into the kernel bank, far above the kernel image, ramdisk,
++ * ADT and boot_args). The shim prints the same word before jumping.
++ */
++#define SWEET_USB_IMEM_PA    SWEET_DEV_MARK_PA
++#define SWEET_USB_IMEM_MARK  0
 +#define SWEET_USB_MARK_GADGET   0x100u
 +#define SWEET_USB_MARK_DALE     0x110u
 +#define SWEET_USB_MARK_DALE_OK  0x111u
@@ -384,7 +390,7 @@ index b6c1a41..070b56a 100644
  void
  sweet_usb_probe(void)
  {
-@@ -82,6 +163,11 @@ sweet_usb_probe(void)
+@@ -82,6 +169,11 @@ sweet_usb_probe(void)
  
  	/* sweetusb=0 off, 1 (default) report state only, 2 also start the USB device */
  	PE_parse_boot_argn("sweetusb", &enabled, sizeof(enabled));
@@ -396,7 +402,7 @@ index b6c1a41..070b56a 100644
  	if (!enabled) {
  		return;
  	}
-@@ -127,11 +213,22 @@ sweet_usb_probe(void)
+@@ -127,11 +219,22 @@ sweet_usb_probe(void)
  	if (phy == 0) {
  		return;
  	}
@@ -424,7 +430,7 @@ index b6c1a41..070b56a 100644
  }
  
  /*
-@@ -161,23 +258,11 @@ sweet_usb_probe(void)
+@@ -161,23 +264,11 @@ sweet_usb_probe(void)
  #define DEPCMDPAR0(n)   (0xc808 + 0x10 * (n))
  #define DEPCMD(n)       (0xc80c + 0x10 * (n))
  
@@ -449,7 +455,7 @@ index b6c1a41..070b56a 100644
  #define DEPCMD_SETEPCONFIG      1
  #define DEPCMD_SETTRANSFRESOURCE 2
  #define DEPCMD_SETSTALL         4
-@@ -296,16 +381,20 @@ ud_start_trb(unsigned ep, uint32_t trb, uint32_t buf, uint32_t len, uint32_t ctl
+@@ -296,16 +387,20 @@ ud_start_trb(unsigned ep, uint32_t trb, uint32_t buf, uint32_t len, uint32_t ctl
  	volatile uint32_t *t = (volatile uint32_t *)(ud.dma + trb);
  	uint64_t bpa = ud.dma_pa + buf;
  
@@ -470,7 +476,7 @@ index b6c1a41..070b56a 100644
  }
  
  static void
-@@ -854,6 +943,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -854,6 +949,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	thread_t thread;
  
  	ud.dwc = dwc;
@@ -478,7 +484,7 @@ index b6c1a41..070b56a 100644
  	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
  	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
  		printf("SWEET USB: no DMA memory\n");
-@@ -867,6 +957,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -867,6 +963,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	ud_if_create();
  
  	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
@@ -486,7 +492,7 @@ index b6c1a41..070b56a 100644
  	dwc_wr(DCTL, DCTL_CSFTRST);
  	int i;
  	for (i = 0; i < 500 && (dwc_rd(DCTL) & DCTL_CSFTRST); i++) {
-@@ -878,6 +969,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -878,6 +975,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		return;
  	}
  
@@ -494,7 +500,7 @@ index b6c1a41..070b56a 100644
  	dwc_wr(GEVNTADRLO, (uint32_t)(ud.dma_pa + UD_EVT));
  	dwc_wr(GEVNTADRHI, (uint32_t)((ud.dma_pa + UD_EVT) >> 32));
  	dwc_wr(GEVNTSIZ, (1u << 31) | UD_EVT_SIZE);     /* interrupt masked: polled */
-@@ -890,6 +982,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -890,6 +988,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	/* Events: disconnect, USB reset, connect done */
  	dwc_wr(DEVTEN, 0x7);
  
@@ -502,7 +508,7 @@ index b6c1a41..070b56a 100644
  	/* Endpoint 0 OUT/IN: start config, control type, max packet 512 until connect done. */
  	if (ud_epcmd(0, DEPCMD_DEPSTARTCFG, 0, 0, 0) ||
  	    ud_epcmd(0, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (0u << 25), 0) ||
-@@ -899,26 +992,66 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -899,26 +998,66 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		printf("SWEET USB: endpoint 0 setup failed\n");
  		return;
  	}
@@ -575,7 +581,7 @@ index b6c1a41..070b56a 100644
  	if (kernel_thread_start(ud_thread, NULL, &thread) == KERN_SUCCESS) {
  		thread_deallocate(thread);
  	}
-@@ -928,4 +1061,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -928,4 +1067,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		thread_deallocate(thread);
  	}
  }
@@ -1048,10 +1054,10 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..2b968a7
+index 0000000..1f8b1dc
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,159 @@
 +#ifndef _PEXPERT_ARM64_SWEET_DEV_H
 +#define _PEXPERT_ARM64_SWEET_DEV_H
 +
@@ -1118,6 +1124,9 @@ index 0000000..2b968a7
 +#define SWEET_DEV_TOUCH_SEC     1
 +#define SWEET_DEV_TOUCH_VREG_NAME "ldoa17"
 +#define SWEET_DEV_TOUCH_VREG_MV 3008
++/* Reset-surviving scratch for the USB gadget progress marker (DRAM, above
++ * the kernel image/ADT/boot_args; the shim reads the same word). */
++#define SWEET_DEV_MARK_PA       0x198000000UL
 +#define SWEET_DEV_TOUCH_SE_PA   0x00c80000u
 +#define SWEET_DEV_TOUCH_GCC_PA  0x00100000u
 +#define SWEET_DEV_TOUCH_NORTH_PA 0x03000000u     /* live tree pinctrl@03000000 */
@@ -1198,6 +1207,7 @@ index 0000000..2b968a7
 +#define SWEET_DEV_TOUCH_SEC     0
 +#define SWEET_DEV_TOUCH_VREG_NAME "ldoc11"
 +#define SWEET_DEV_TOUCH_VREG_MV 3200
++#define SWEET_DEV_MARK_PA       0x118000000UL
 +#define SWEET_DEV_KEYS_VOLUME   1   /* GPIO2 volume-up + PON RESIN volume-down */
 +
 +/* Panel physical size in mm (digitizer reporting). */

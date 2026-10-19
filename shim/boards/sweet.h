@@ -23,5 +23,8 @@
 /* Internal UFS host (ufshc@1d84000 "ufs_mem"); probe path only. */
 #define UFS_BASE		0x01d84000UL
 
+/* Reset-surviving scratch word (DRAM): see shim/boards/guacamole.h. */
+#define MARK_PA			0x118000000UL
+
 /* The UFS probe is safe on sweet (ABL leaves the host running). */
 #define PROBE_UFS		1

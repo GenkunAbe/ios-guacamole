@@ -423,9 +423,9 @@ void shim_main(uint64_t dtb)
 	con_str("SHIM", "sweet milestone 4: xnu loader");
 	con_str("BOARD", BOARD_NAME);
 	con_skip();
-	/* The USB gadget progress marker the last kernel run left in IMEM
+	/* The USB gadget progress marker the last kernel run left in DRAM
 	 * (survives EDL resets; see bsd/dev/sweet_usb.c). */
-	con_hex("IMEM", *(volatile uint32_t *)(uintptr_t)(IMEM_RESTART_REASON - 0x65c + 0x8f0));
+	con_hex("MARK", *(volatile uint32_t *)(uintptr_t)MARK_PA);
 
 	const char *why = loader_boot(dtb);
 	con_str("LOADER", why);

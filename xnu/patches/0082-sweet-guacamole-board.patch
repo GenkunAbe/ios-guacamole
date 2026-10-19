@@ -133,7 +133,7 @@ index a148608..ad97533 100644
  	if (kr == KERN_SUCCESS) {
  		thread_deallocate(thread);
 diff --git a/bsd/dev/sweet_rpmh.c b/bsd/dev/sweet_rpmh.c
-index 4da50d8..eb2e3bb 100644
+index 4da50d8..2f75bce 100644
 --- a/bsd/dev/sweet_rpmh.c
 +++ b/bsd/dev/sweet_rpmh.c
 @@ -9,15 +9,16 @@
@@ -157,7 +157,26 @@ index 4da50d8..eb2e3bb 100644
  #define RH_DRV          2u
  #define RH_ACTIVE_N     2u       /* DT order: ACTIVE 2, SLEEP 3, WAKE 3 */
  #define RH_NORMAL_N     8u       /* hidden CONTROL TCS is not in this bank */
-@@ -327,9 +328,9 @@ rh_send(uint32_t address, unsigned mv)
+@@ -150,11 +151,15 @@ rh_map(void)
+ 	uint32_t flags = rh_read(rh_db, 140);
+ 	printf("SWEET RPMH: cmd-db version=%#x magic=%#x checksum=%#x flags=%#x\n",
+ 	    db_version, magic, rh_read(rh_db, 136), flags);
+-	/* Linux only checks magic; version 1 is an intentionally stricter policy. */
+-	if (magic != RH_DB_MAGIC || db_version != 1 || (flags & 1u)) {
+-		printf("SWEET RPMH: unsupported/standalone cmd-db\n");
++	/* Mainline cmd-db.c only validates the magic. Keep version and flags
++	 * advisory so a newer but compatible database is not rejected. */
++	if (magic != RH_DB_MAGIC) {
++		printf("SWEET RPMH: unsupported cmd-db magic\n");
+ 		return EINVAL;
+ 	}
++	if (db_version != 1u || (flags & 1u)) {
++		printf("SWEET RPMH: cmd-db version/flags differ from the v1 layout; continuing\n");
++	}
+ 	return 0;
+ }
+ 
+@@ -327,9 +332,9 @@ rh_send(uint32_t address, unsigned mv)
  int
  sweet_rpmh_vreg_enable(const char *res, unsigned mv)
  {
@@ -251,10 +270,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..e15b1f8
+index 0000000..f6bbbe3
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,696 @@
+@@ -0,0 +1,709 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -359,6 +378,9 @@ index 0000000..e15b1f8
 +#define TS_PIN_RESET    54u
 +#define TS_PIN_1V8      119u
 +#define TS_PIN_IRQ      122u
++/* SE17 I2C lines (live tree qupv3_se17_i2c_active: gpio55/gpio56, qup17). */
++#define TS_PIN_I2C_SDA  55u
++#define TS_PIN_I2C_SCL  56u
 +/* Common TLMM layout: ctl at +0, io (latch/level) at +4, 0x1000 per pin. */
 +#define TS_GPIO_CFG(n)  ((uint32_t)(n) * 0x1000u)
 +#define TS_GPIO_IO(n)   (TS_GPIO_CFG(n) + 4u)
@@ -854,6 +876,11 @@ index 0000000..e15b1f8
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_1V8)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_1V8)),
 +	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)));
 +
++	/* Route the SE17 lines to the QUP function (device tree: gpio55/56 as
++	 * qup17, 2 mA, no pulls) in case the bootloader left them as GPIO. */
++	ts_gpio(TS_PIN_I2C_SDA, 1, 0, 0, false, false);
++	ts_gpio(TS_PIN_I2C_SCL, 1, 0, 0, false, false);
++
 +	/* Vendor power order: 1v8 enable, 1 ms, 2v8 rail, reset high, 70 ms. */
 +	ts_gpio(TS_PIN_IRQ, 0, 0, 3, false, false);   /* input, bias-disable, 8 mA */
 +	ts_gpio(TS_PIN_1V8, 0, 3, 3, true, true);     /* output high: 1v8 enable */
@@ -865,6 +892,11 @@ index 0000000..e15b1f8
 +	ts_wait(5);
 +	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, true);   /* reset released */
 +	ts_wait(70);
++	printf("SWEET TOUCH: pins now rst=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x i2c=%#x/%#x\n",
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_RESET)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_RESET)),
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_1V8)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_1V8)),
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_IRQ)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_IRQ)),
++	    ts_rd(ts.gpio, TS_GPIO_CFG(TS_PIN_I2C_SDA)), ts_rd(ts.gpio, TS_GPIO_IO(TS_PIN_I2C_SDA)));
 +
 +	ts.probing = true;
 +	int ack = ts_wait_ready(TS_ACK_BOOT_COMPLETE, 100);
@@ -1827,10 +1859,10 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..a822961
+index 0000000..2ee1e6c
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,173 @@
 +#ifndef _PEXPERT_ARM64_SWEET_DEV_H
 +#define _PEXPERT_ARM64_SWEET_DEV_H
 +
@@ -1888,7 +1920,9 @@ index 0000000..a822961
 +#define SWEET_DEV_RPMH_RSC_PA   0x18220000u
 +#define SWEET_DEV_RPMH_TCS_PA   0x18220d00u
 +#define SWEET_DEV_RPMH_TCS_SIZE 0x3000u
-+#define SWEET_DEV_RPMH_DICT_PA  0x0c3f0000cu
++/* Live tree qcom,cmd-db@c3f000c reg=<0xc3f000c 0x8>: the 8-byte locator
++ * holds {command-db physical address, size}. */
++#define SWEET_DEV_RPMH_DICT_PA  0x0c3f000cu
 +
 +/* Touch: Samsung S6SY761 @0x48 on qupv3 SE17 I2C (i2c@0xc80000, SPI 373),
 + * IRQ tlmm 122, reset tlmm 54, 1.8 V I/O switch tlmm 119, vdd pm8150_l17

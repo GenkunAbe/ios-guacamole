@@ -106,6 +106,19 @@
   GCC_QUPV3_WRAP2_S0_CLK (0x52014 BIT(4)), m-ahb BIT(2), s-ahb BIT(1), RCG cmd 0x1e148.
   The driver now prints each branch value with a tag (ok/fsm-on/hwcg/HALTED) and
   `sweetforce=1` proceeds when one still reads halted.
+- **Second touch boot (img-t3, 2026-10-19 evening).** The branch fix worked: `br 0x1e004=0 ok`,
+  `br 0x1e008=0x2 hwcg`, `br 0x1e144=0x4220 ok`; the SE read back `fw=0x303 proto=3 status=0
+  tx=0x20102964 rx=0x20104900`, packing readback matched, so the GENI engine itself is healthy.
+  The IC still did not answer (`err=60` = ETIMEDOUT on every register) because the 2.8 V rail
+  was never enabled: `SWEET RPMH: cmd-db locator=0x... invalid` - the guacamole
+  `SWEET_DEV_RPMH_DICT_PA` in sweet_dev.h was `0x0c3f0000c` (3.29 GB, one extra zero) while the
+  live tree's `qcom,cmd-db@c3f000c` is `reg=<0xc3f000c 0x8>` (the 8-byte locator holding
+  {db pa, size}); the read landed in DRAM and produced garbage. Fixed the constant, made the
+  cmd-db version/flags checks advisory (mainline only validates the magic 0x0c0330db), and added
+  explicit SE17 I2C pin routing (gpio55/56 as qup17, 2 mA, per qupv3_se17_i2c_active) plus a
+  post-configure pin readback. cmd-db facts verified: header 144 B, entry 24 B, hw types
+  ARC=3/VRM=4/BCM=5, rail resource name "ldoa17" (parent node rpmh-regulator-ldoa17),
+  DT init voltage 3008 mV.
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

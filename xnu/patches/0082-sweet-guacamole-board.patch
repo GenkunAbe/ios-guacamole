@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..91fbf3e 100644
+index b6c1a41..5cb4d57 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -480,7 +480,34 @@ index b6c1a41..91fbf3e 100644
  }
  
  static void
-@@ -854,6 +953,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -712,6 +811,11 @@ ud_event(uint32_t ev)
+ 		if (type == 1) {        /* USB reset */
+ 			dwc_wr(DCFG, dwc_rd(DCFG) & ~(0x7fu << 3));
+ 			printf("SWEET USB: bus reset\n");
++#if SWEET_DEV_USB_ARM_ON_EVENT
++			/* The host has reset the bus: arming now is safe. */
++			printf("SWEET USB: arming ep0 setup after bus reset\n");
++			ud_start_setup();
++#endif
+ 		} else if (type == 2) { /* connect done */
+ 			uint32_t speed = dwc_rd(DSTS) & 7;
+ 			/* ep0 max packet: 64 at high/full speed (modify action) */
+@@ -773,6 +877,14 @@ ud_event(uint32_t ev)
+ 			ud_start(ep, UD_DATA, 0, ctl);
+ 		}
+ 	}
++#if SWEET_DEV_USB_ARM_ON_EVENT
++	if (type == 3 && status == 1) { /* XferNotReady, control setup: no TRB armed */
++		if (ud.state != EP0_SETUP) {
++			printf("SWEET USB: NotReady setup -> arm\n");
++			ud_start_setup();
++		}
++	}
++#endif
+ }
+ 
+ static void
+@@ -854,6 +966,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	thread_t thread;
  
  	ud.dwc = dwc;
@@ -488,7 +515,7 @@ index b6c1a41..91fbf3e 100644
  	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
  	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
  		printf("SWEET USB: no DMA memory\n");
-@@ -867,6 +967,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -867,6 +980,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	ud_if_create();
  
  	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
@@ -496,7 +523,7 @@ index b6c1a41..91fbf3e 100644
  	dwc_wr(DCTL, DCTL_CSFTRST);
  	int i;
  	for (i = 0; i < 500 && (dwc_rd(DCTL) & DCTL_CSFTRST); i++) {
-@@ -878,6 +979,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -878,6 +992,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		return;
  	}
  
@@ -504,7 +531,7 @@ index b6c1a41..91fbf3e 100644
  	dwc_wr(GEVNTADRLO, (uint32_t)(ud.dma_pa + UD_EVT));
  	dwc_wr(GEVNTADRHI, (uint32_t)((ud.dma_pa + UD_EVT) >> 32));
  	dwc_wr(GEVNTSIZ, (1u << 31) | UD_EVT_SIZE);     /* interrupt masked: polled */
-@@ -890,6 +992,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -890,6 +1005,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	/* Events: disconnect, USB reset, connect done */
  	dwc_wr(DEVTEN, 0x7);
  
@@ -512,7 +539,7 @@ index b6c1a41..91fbf3e 100644
  	/* Endpoint 0 OUT/IN: start config, control type, max packet 512 until connect done. */
  	if (ud_epcmd(0, DEPCMD_DEPSTARTCFG, 0, 0, 0) ||
  	    ud_epcmd(0, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (0u << 25), 0) ||
-@@ -899,26 +1002,66 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -899,26 +1015,72 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		printf("SWEET USB: endpoint 0 setup failed\n");
  		return;
  	}
@@ -529,6 +556,9 @@ index b6c1a41..91fbf3e 100644
 -	ud_start_setup();
 +	usb_mark(SWEET_USB_MARK_DALE_OK);
 +	printf("SWEET USB:   - ep0 setup TRB\n");
++#if SWEET_DEV_USB_ARM_ON_EVENT
++	printf("SWEET USB:   - setup armed on bus reset / XferNotReady\n");
++#else
 +	int late_arm = 0;
 +	(void)PE_parse_boot_argn("sweetlatear", &late_arm, sizeof(late_arm));
 +	if (!late_arm) {
@@ -536,6 +566,7 @@ index b6c1a41..91fbf3e 100644
 +	} else {
 +		printf("SWEET USB:   - setup arm deferred to after RUN_STOP (sweetlatear=1)\n");
 +	}
++#endif
 +	usb_mark(SWEET_USB_MARK_STEP4_OK);
 +	printf("SWEET USB:   - step 4 done\n");
  
@@ -578,14 +609,16 @@ index b6c1a41..91fbf3e 100644
  		delay(1000);
  	}
  	printf("SWEET USB: running (DSTS 0x%08x after %d ms), DMA at 0x%llx\n", dwc_rd(DSTS), i, ud.dma_pa);
++#if !SWEET_DEV_USB_ARM_ON_EVENT
 +	if (late_arm) {
 +		printf("SWEET USB:   - deferred setup arm (after RUN_STOP)\n");
 +		ud_start_setup();
 +	}
++#endif
  	if (kernel_thread_start(ud_thread, NULL, &thread) == KERN_SUCCESS) {
  		thread_deallocate(thread);
  	}
-@@ -928,4 +1071,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -928,4 +1090,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		thread_deallocate(thread);
  	}
  }
@@ -1058,10 +1091,10 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..1f8b1dc
+index 0000000..b4ba179
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,164 @@
 +#ifndef _PEXPERT_ARM64_SWEET_DEV_H
 +#define _PEXPERT_ARM64_SWEET_DEV_H
 +
@@ -1131,6 +1164,10 @@ index 0000000..1f8b1dc
 +/* Reset-surviving scratch for the USB gadget progress marker (DRAM, above
 + * the kernel image/ADT/boot_args; the shim reads the same word). */
 +#define SWEET_DEV_MARK_PA       0x198000000UL
++/* SM8150's DWC3 wedges (bus hang -> watchdog -> EDL) if STARTTRANSFER is
++ * issued before the host has reset the bus, so arm ep0 on USB reset /
++ * XferNotReady instead of at bring-up. */
++#define SWEET_DEV_USB_ARM_ON_EVENT 1
 +#define SWEET_DEV_TOUCH_SE_PA   0x00c80000u
 +#define SWEET_DEV_TOUCH_GCC_PA  0x00100000u
 +#define SWEET_DEV_TOUCH_NORTH_PA 0x03000000u     /* live tree pinctrl@03000000 */
@@ -1212,6 +1249,7 @@ index 0000000..1f8b1dc
 +#define SWEET_DEV_TOUCH_VREG_NAME "ldoc11"
 +#define SWEET_DEV_TOUCH_VREG_MV 3200
 +#define SWEET_DEV_MARK_PA       0x118000000UL
++#define SWEET_DEV_USB_ARM_ON_EVENT 0
 +#define SWEET_DEV_KEYS_VOLUME   1   /* GPIO2 volume-up + PON RESIN volume-down */
 +
 +/* Panel physical size in mm (digitizer reporting). */

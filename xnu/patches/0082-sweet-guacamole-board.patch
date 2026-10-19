@@ -270,10 +270,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..1f1ed09
+index 0000000..ac17902
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,635 @@
+@@ -0,0 +1,637 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 at I2C address 0x48
 + * on the SE17 lines (gpio55/gpio56, live tree qupv3_se17_i2c_active).
@@ -803,9 +803,11 @@ index 0000000..1f1ed09
 +	printf("SWEET TOUCH: vreg %s %u mV -> %d\n", SWEET_DEV_TOUCH_VREG_NAME,
 +	    SWEET_DEV_TOUCH_VREG_MV, ts.vreg_err);
 +	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, false);  /* reset asserted */
-+	ts_wait(5);
++	ts_wait(20);
 +	ts_gpio(TS_PIN_RESET, 0, 0, 3, true, true);   /* reset released */
-+	ts_wait(70);
++	ts_wait(140);                                 /* mainline power-on wait */
++	/* A previous session may have left the target holding SDA low. */
++	bb_recover();
 +	printf("SWEET TOUCH: pins now rst=%#x/%#x 1v8=%#x/%#x irq=%#x/%#x bus=%#x/%#x\n",
 +	    ts_gpio_rd(TS_PIN_RESET), ts_gpio_io_rd(TS_PIN_RESET),
 +	    ts_gpio_rd(TS_PIN_1V8), ts_gpio_io_rd(TS_PIN_1V8),
@@ -1595,6 +1597,27 @@ index 9a748ea..461262f 100644
  export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64e
  endif
  endif
+diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+index 00568d3..6d994d2 100644
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -2806,8 +2806,14 @@ pmap_assert_free(ppnum_t ppnum)
+ 		pmap_t pmap = ptep_get_pmap(first_ptep);
+ 		const char *type = (pmap == kernel_pmap) ? "Kernel" : "User";
+ 
+-		panic("%s: Found at least one mapping to %#llx. First PTEP (%p) is a "
+-		    "%s CPU mapping (pmap: %p)",
++		/*
++		 * SWEET: this MACH_ASSERT check cannot lock the PVH and its own
++		 * comment allows for false positives while mappings are created
++		 * concurrently (heavy exec/spawn). Keep the diagnostic but do not
++		 * take the machine down.
++		 */
++		printf("%s: Found at least one mapping to %#llx. First PTEP (%p) is a "
++		    "%s CPU mapping (pmap: %p); continuing",
+ 		    __func__, (uint64_t)pa, first_ptep, type, pmap);
+ 	}
+ }
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 index 06bb568..513b704 100644
 --- a/osfmk/arm64/arm_vm_init.c

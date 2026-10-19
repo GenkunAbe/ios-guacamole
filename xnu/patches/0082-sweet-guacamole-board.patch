@@ -181,7 +181,7 @@ index 1981490..c8ea9d5 100644
  
  static vm_offset_t sp_core, sp_obs, sp_cfg;
 diff --git a/bsd/dev/sweet_touch.c b/bsd/dev/sweet_touch.c
-index 03defe6..141f0b6 100644
+index 03defe6..723d314 100644
 --- a/bsd/dev/sweet_touch.c
 +++ b/bsd/dev/sweet_touch.c
 @@ -5,7 +5,10 @@
@@ -221,13 +221,14 @@ index 03defe6..141f0b6 100644
  #define TOUCH_GPIO_CFG(n) ((uint32_t)(n) * 0x1000u)
  #define TOUCH_GPIO_IO(n)  (TOUCH_GPIO_CFG(n) + 4u)
  #define TOUCH_MAX        10u
-@@ -657,4 +661,14 @@ sweet_touch_init(void)
+@@ -657,4 +661,15 @@ sweet_touch_init(void)
  		printf("SWEET TOUCH: kernel_thread_start failed %d\n", kr);
  	}
  }
-+#elif defined(ARM64_BOARD_CONFIG_SWEET) && !SWEET_DEV_TOUCH_SEC
++#elif defined(ARM64_BOARD_CONFIG_SWEET)
 +/*
 + * No touch driver for this board yet: keeps the sweet_ufs.c call site happy.
++ * (sweet_touch_sec.c will replace this once the S6SY761 driver lands.)
 + */
 +#include <sys/systm.h>
 +void

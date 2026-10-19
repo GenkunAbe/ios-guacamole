@@ -54,6 +54,22 @@
   (hpcopy; no loop mount, no root) -> img2simg -> fastboot flash userdata. mkiosroot.sh
   currently assumes sudo + loop mount, so either the user provides sudo on this machine or
   the tooling is switched to the userspace path.
+- **SMP works on the phone: 8/8 cores** (boot with `cpus=8`, md0 root): PSCI CPU_ON rc=0 for
+  every secondary, `SWEET CPU: cpuN mpidr=0xN00 came alive; SGI1 OK` for cpu1..cpu7 and
+  `SWEET CPU: 8/8 CPUs initialized, SGI1 verified`. The MPIDRs match the ADT exactly
+  (0x400/0x500/0x600/0x700 = the A76 cluster + prime). The launchd panic still ends the boot
+  (no userland on the test volume), and the secondaries finish starting after it.
+- **USB prepared for guacamole**: GCC registers from mainline gcc-sm8150.c - GDSCR 0xf004,
+  CBCRs master/sleep/utmi 0xf010/0xf014/0xf018 (same as sweet), cfg-noc 0xf078, aggre 0xf07c,
+  USB3 PHY aux 0xf050, clkref 0x8c008 (no ahb2phy on this SoC); the driver table reads them
+  from sweet_dev.h and `SWEET_DEV_USB` is now 1 for guacamole, so `sweetusb=1` (state probe)
+  runs by default and `sweetusb=2` starts the CDC-ECM gadget + the UDP live log (5140) once
+  the host side has an address on the new interface (needs one sudo command on this PC, or
+  the user configures it).
+- Touch groundwork: `sweet_rpmh_vreg_enable` now takes the board's rail via
+  `SWEET_DEV_TOUCH_VREG_NAME`/`_MV` (guacamole `ldoa17`, 3008 mV; the RPMh name is resolved
+  in the command DB) and SweetHIDTouch clamps to the board's panel size. The S6SY761 driver
+  file (GENI SE17 + sec_ts protocol) is the next kernel item after USB.
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

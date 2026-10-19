@@ -70,6 +70,28 @@
   `SWEET_DEV_TOUCH_VREG_NAME`/`_MV` (guacamole `ldoa17`, 3008 mV; the RPMh name is resolved
   in the command DB) and SweetHIDTouch clamps to the board's panel size. The S6SY761 driver
   file (GENI SE17 + sec_ts protocol) is the next kernel item after USB.
+- **USB on the GM1910: deep-dive results (2026-10-19 evening).** The controller is powered
+  (GDSC on) and all seven GCC clocks are on; the DWC3 registers are readable; the femto-v2
+  HS PHY is out of POR (read via the mainline offsets; SM8150 uses phy-qcom-snps-femto-v2.c,
+  not the SM6150 qusb2-v2 layout). Chain of findings, each from a boot + video:
+  1. `DEPCMD STARTTRANSFER` issued at bring-up **wedges the bus** (hang -> APSS watchdog ->
+     hard reset -> ABL lands in EDL, `05c6:900e`). Fixed: arm ep0 only on USB reset /
+     XferNotReady (SWEET_DEV_USB_ARM_ON_EVENT; sweet keeps its bring-up arm).
+  2. With the arm fixed and no VBUS override the kernel survives, but the host sees nothing:
+     the controller has no VBUS session, so it never pulls D+ up.
+  3. Enabling the QSCRATCH override: the **wrapper at 0xa6f8800 reads fine but any write
+     hangs the bus** (HS-only as well as HS+SS; the SS PHY is the USB3/DP combo ABL drives
+     for the display, but HS alone is fatal too).
+  4. The **PHY-side override** (femto v2 COMMON1 bit4 + CTRL1 bit0, byte writes) also hangs
+     the bus: the PHY window is read-only in this state as well.
+  Conclusion: forcing VBUS from the kernel needs the PMIC/Type-C/PD path (how ABL itself
+  enumerates) - parked for now. The screen + phone-camera video remain the log channel;
+  a cheaper next step for real logs would be a RAM console ring at SWEET_DEV_MARK_PA that
+  the shim dumps on the next boot. USB progress markers in IMEM/DRAM did NOT survive
+  (0x8f0 read back 0; the DRAM word read back stale 0x124000), so the video is the tool.
+- USB code now has: `sweetusbstep=N` (stop before step N), `sweetvbus=0..3`, event-driven
+  arm, per-step prints, and the `sweetusb=1` read-only state probe with the correct PHY
+  registers.
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

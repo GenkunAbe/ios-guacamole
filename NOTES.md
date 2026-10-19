@@ -24,6 +24,21 @@
   must not be written until the user approves replacing it). If the driver's first register
   reads hang (the shim probe did), the SM8150 UFS host needs its GCC clocks/GDSC powered up
   by the driver instead of assuming ABL left it running.
+- **UFS WORKS on the phone** (boot with `rd=ufsroot0`, read-only): the driver read the GPT
+  and registered `userdata` (`first block 0x6c1800, 252270 MiB, read-only`), `BSD root:
+  ufsroot0`; the HFS mount then fails on Android's ext4/FBE data (`unknown Volume Signature
+  : 2527`, errno 19) and bsd_init retries forever - expected, nothing written. The earlier
+  shim freeze was only the MMU-off/strongly-ordered probe, not the host state. The stubs
+  print as designed (`SWEET TOUCH/USB: no driver for this board yet`).
+- Next test (non-destructive): RAM-disk HFS+ root. `mkfs` tooling on this machine is not
+  packaged; the Debian Linux port (glaubitz/hfsprogs-debian) builds with a one-line stub
+  `include/sys/sysctl.h` (glibc dropped the header; the LINUX paths never call it):
+  `make -C BlocksRunTime -f Makefile.lnx && make all` -> newfs_hfs/fsck_hfs. Test volume:
+  `truncate -s 32M root.img; newfs_hfs -v SweetRoot -s -J root.img` (HFSX+journal),
+  packaged with `mkpayload.py --ramdisk root.img` and booted with `rd=md0`; the ADT carries
+  /chosen/memory-map RAMDisk = <pa,size> for IOFindBSDRoot. This exercises vfs/HFS/exec
+  without touching the phone's storage; with no /sbin/launchd the expected end is a
+  load_init_program panic.
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

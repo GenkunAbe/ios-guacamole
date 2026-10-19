@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..b9bbb72 100644
+index b6c1a41..ac8c811 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -300,7 +300,21 @@ index b6c1a41..b9bbb72 100644
  #define QUSB2_SIZE              0x00000400
  
  static uint32_t
-@@ -167,7 +171,7 @@ sweet_usb_probe(void)
+@@ -132,6 +136,13 @@ sweet_usb_probe(void)
+ 	 * PLL_CORE_INPUT_OVERRIDE 0x0a8, TEST1 0x254. */
+ 	printf("SWEET USB: QUSB2 PLL_STATUS 0x%08x PWR_CTRL1 0x%08x PORT_TUNE1 0x%08x TEST1 0x%08x\n",
+ 	    usb_rd(phy, 0x1a0), usb_rd(phy, 0x210), usb_rd(phy, 0x240), usb_rd(phy, 0x254));
++
++	/* USB3/QUSB2 wrapper (dwc3-msm QSCRATCH = core + 0xf8800): read-only. */
++	vm_offset_t qs = ml_io_map(QSCRATCH_PA, 0x100);
++	if (qs != 0) {
++		printf("SWEET USB: QSCRATCH HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x GENERAL_CFG 0x%08x\n",
++		    usb_rd(qs, QSCRATCH_HS_PHY_CTRL), usb_rd(qs, QSCRATCH_SS_PHY_CTRL), usb_rd(qs, 0x08));
++	}
+ }
+ 
+ /*
+@@ -167,7 +178,7 @@ sweet_usb_probe(void)
   * session; Linux dwc3-qcom forces that in software when the charger
   * reports a cable (dwc3_qcom_vbus_override_enable).
   */
@@ -309,7 +323,73 @@ index b6c1a41..b9bbb72 100644
  #define QSCRATCH_HS_PHY_CTRL    0x10
  #define   UTMI_OTG_VBUS_VALID   (1u << 20)
  #define   SW_SESSVLD_SEL        (1u << 28)
-@@ -928,4 +932,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -854,6 +865,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 	thread_t thread;
+ 
+ 	ud.dwc = dwc;
++	printf("SWEET USB: gadget step 0: DMA + ifnet\n");
+ 	if (kmem_alloc_contig(kernel_map, &ud.dma, UD_SIZE, PAGE_MASK, 0, 0,
+ 	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+ 		printf("SWEET USB: no DMA memory\n");
+@@ -867,6 +879,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 	ud_if_create();
+ 
+ 	/* Device controller soft reset (PHY and global setup stay as ABL left them). */
++	printf("SWEET USB: gadget step 1: DCTL soft reset (GCTL 0x%08x)\n", dwc_rd(GCTL));
+ 	dwc_wr(DCTL, DCTL_CSFTRST);
+ 	int i;
+ 	for (i = 0; i < 500 && (dwc_rd(DCTL) & DCTL_CSFTRST); i++) {
+@@ -878,6 +891,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 		return;
+ 	}
+ 
++	printf("SWEET USB: gadget step 2: event buffer + DCFG/DEVTEN\n");
+ 	dwc_wr(GEVNTADRLO, (uint32_t)(ud.dma_pa + UD_EVT));
+ 	dwc_wr(GEVNTADRHI, (uint32_t)((ud.dma_pa + UD_EVT) >> 32));
+ 	dwc_wr(GEVNTSIZ, (1u << 31) | UD_EVT_SIZE);     /* interrupt masked: polled */
+@@ -890,6 +904,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 	/* Events: disconnect, USB reset, connect done */
+ 	dwc_wr(DEVTEN, 0x7);
+ 
++	printf("SWEET USB: gadget step 3: endpoint 0 setup\n");
+ 	/* Endpoint 0 OUT/IN: start config, control type, max packet 512 until connect done. */
+ 	if (ud_epcmd(0, DEPCMD_DEPSTARTCFG, 0, 0, 0) ||
+ 	    ud_epcmd(0, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (0u << 25), 0) ||
+@@ -899,21 +914,28 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+ 		printf("SWEET USB: endpoint 0 setup failed\n");
+ 		return;
+ 	}
++	printf("SWEET USB: gadget step 4: DALEPENA + setup engine\n");
+ 	dwc_wr(DALEPENA, 0x3);
+ 	ud_start_setup();
+ 
++	int vbus = 1;
++	(void)PE_parse_boot_argn("sweetvbus", &vbus, sizeof(vbus));
++	printf("SWEET USB: gadget step 5: QSCRATCH%s\n", vbus ? "" : " (read only, sweetvbus=0)");
+ 	vm_offset_t qs = ml_io_map(QSCRATCH_PA, 0x100);
+ 	if (qs != 0) {
+ 		uint32_t hs = usb_rd(qs, QSCRATCH_HS_PHY_CTRL), ss = usb_rd(qs, QSCRATCH_SS_PHY_CTRL);
+ 		printf("SWEET USB: QSCRATCH HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x GENERAL_CFG 0x%08x\n",
+ 		    hs, ss, usb_rd(qs, 0x08));
+-		*(volatile uint32_t *)(qs + QSCRATCH_HS_PHY_CTRL) = hs | UTMI_OTG_VBUS_VALID | SW_SESSVLD_SEL;
+-		*(volatile uint32_t *)(qs + QSCRATCH_SS_PHY_CTRL) = ss | LANE0_PWR_PRESENT;
+-		__asm__ volatile ("dsb sy" ::: "memory");
+-		printf("SWEET USB: VBUS override on: HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x\n",
+-		    usb_rd(qs, QSCRATCH_HS_PHY_CTRL), usb_rd(qs, QSCRATCH_SS_PHY_CTRL));
++		if (vbus) {
++			*(volatile uint32_t *)(qs + QSCRATCH_HS_PHY_CTRL) = hs | UTMI_OTG_VBUS_VALID | SW_SESSVLD_SEL;
++			*(volatile uint32_t *)(qs + QSCRATCH_SS_PHY_CTRL) = ss | LANE0_PWR_PRESENT;
++			__asm__ volatile ("dsb sy" ::: "memory");
++			printf("SWEET USB: VBUS override on: HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x\n",
++			    usb_rd(qs, QSCRATCH_HS_PHY_CTRL), usb_rd(qs, QSCRATCH_SS_PHY_CTRL));
++		}
+ 	}
+ 
++	printf("SWEET USB: gadget step 6: RUN_STOP\n");
+ 	dwc_wr(DCTL, dwc_rd(DCTL) | DCTL_RUN_STOP);
+ 	for (i = 0; i < 500 && (dwc_rd(DSTS) & DSTS_DEVCTRLHLT); i++) {
+ 		delay(1000);
+@@ -928,4 +950,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		thread_deallocate(thread);
  	}
  }

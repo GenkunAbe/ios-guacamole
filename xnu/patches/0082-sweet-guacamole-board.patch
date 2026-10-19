@@ -462,6 +462,39 @@ index 27bc49d..746feb4 100644
  	gSweetTouch = this;
  	registerService();
  	IOLog("SWEET HID: touch registered\n");
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index 92f3e26..bc93771 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -35,6 +35,20 @@
+ const char * gIOKernelConfigTables =
+     "("
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
++#if defined(ARM64_BOARD_CONFIG_GUACAMOLE)
++    "   {"
++    "     'IOClass'         = SweetPlatformExpert;"
++    "     'IOProviderClass' = IOPlatformExpertDevice;"
++    "     'IONameMatch'     = 'oneplus,guacamole';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
++    "   {"
++    "     'IOClass'         = SweetCPU;"
++    "     'IOProviderClass' = IOPlatformDevice;"
++    "     'IONameMatch'     = 'qcom,kryo485';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
++#else /* SWEET board */
+     "   {"
+     "     'IOClass'         = SweetPlatformExpert;"
+     "     'IOProviderClass' = IOPlatformExpertDevice;"
+@@ -47,6 +61,7 @@ const char * gIOKernelConfigTables =
+     "     'IONameMatch'     = 'qcom,kryo470';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
++#endif /* ARM64_BOARD_CONFIG_GUACAMOLE */
+     "   {"
+     "     'IOClass'         = AppleKeyStore;"
+     "     'IOProviderClass' = IOResources;"
 diff --git a/libkern/conf/Makefile.template b/libkern/conf/Makefile.template
 index aca295c..f20b12d 100644
 --- a/libkern/conf/Makefile.template

@@ -66,6 +66,21 @@ void con_skip(void)
 	row++;
 }
 
+int con_row(void)
+{
+	return row;
+}
+
+int con_rows(void)
+{
+	return (FB_H - 2 * MARGIN) / CH_H;
+}
+
+int con_cols(void)
+{
+	return (FB_W - 2 * MARGIN) / CH_W;
+}
+
 void con_str(const char *label, const char *s)
 {
 	put_str(0, label, YELLOW);

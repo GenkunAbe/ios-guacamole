@@ -157,11 +157,12 @@ The log contains crash reports with backtraces (`CRASH name ...`), IOKit traces 
 
 | Path | What |
 | --- | --- |
-| `shim/` | Bare-metal boot shim (C + asm) packed as an Android boot.img v2 |
+| `shim/` | Bare-metal boot shim (C + asm) packed as an Android boot.img v2; with no payload it prints the live-FDT bring-up report (`shim/probe.c`) |
 | `xnu/patches/` | The XNU patch series (applied in order by CI), plus staging scripts for libpthread, HFS and BearSSL |
 | `.github/workflows/xnu.yml` | Kernel CI build |
 | `tools/mkadt.py` | Generates the Apple Device Tree from the board's MMIO layout and the iPhone X identity (`--device sweet\|guacamole`) |
 | `tools/devices.py` | Per-board hardware profiles (memory, GIC, CPUs, framebuffer, UFS) for the ADT/shim |
+| `tools/mkfdt-test.py` | Test device tree for the shim's live-FDT probe and the host renderer |
 | `tools/mkpayload.py` | Packs kernel + ADT + boot-args into the shim payload |
 | `tools/mkiosroot.sh` | Builds the HFS+ iOS root from the IPSW images |
 | `tools/sweet-root-tweaks.py` | Bring-up changes to the root (Setup skip, activation, daemons) |

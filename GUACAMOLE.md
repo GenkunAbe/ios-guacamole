@@ -79,29 +79,46 @@ recovery with `adb root` for log pulls.
 
 0. **Back up** `persist`, `modemst1/2`, `fsg`, `fsc`, `boot`, `dtbo`,
    `vbmeta` (same as sweet; `backup/` is gitignored).
-1. **Dump the stock DTB and audit the *(verify)* values.**
+1. **Probe boot: run the shim *without* a payload first.** This is the
+   "does it boot at all" step, and it audits every *(verify)* value from
+   the live FDT on the phone itself:
    ```sh
-   python3 tools/unpack_bootv2.py backup/boot.img dtb/boot_unpacked
-   # walk dtb/boot_unpacked/dtb (or the shim's no-payload probe output):
-   #   /memory reg, reserved-memory        -> devices.py memory + fb
-   #   /soc gic, timer                     -> GIC base, PPIs, CNTFRQ
-   #   /cpus reg, psci                     -> MPIDR map, PSCI conduit
-   #   /soc ufshc                          -> UFS base/size
-   #   /soc spmi, RPMh, TLMM, GCC          -> driver constants
+   python3 tools/unpack_bootv2.py backup/boot.img dtb/boot_unpacked   # stock DTB
+   BOARD=guacamole DTB=dtb/boot_unpacked/dtb shim/build.sh            # no payload
+   fastboot boot shim/out/shim-boot.img
    ```
+   The panel (ABL's splash) is taken over by the shim console and the
+   report shows: DTB size/version, root model/compatible, **MEM** banks,
+   **RSVD** carve-outs (`cont_splash_region 00009C000000+00002400000` is
+   the one the whole display path depends on), then GIC / TMR / SPMI /
+   UFS / USB / DWC3 / HSPHY / QMPPHY / TLMM / GCC / RSC / IMEM / PSHOLD,
+   `/chosen` initrd, the **CPUS** MPIDRs and the pre-console framebuffer
+   pixel stats (`FB px0=... lit=N/256`). It ends with the read-only UFS
+   probe and reboots after ~3 minutes (hold Power + Volume-Down for
+   fastboot). A photo of that screen is the complete audit; without a
+   phone the same report renders on a workstation:
+   ```sh
+   python3 tools/mkfdt-test.py /tmp/guac.dtb
+   (cd shim && BOARD=guacamole DTB=/tmp/guac.dtb ./build.sh)
+   ./shim/out/host_test /tmp/guac.dtb      # -> shim/out/probe.ppm
+   ```
+   Only when the report matches `tools/devices.py` / `sweet_dev.h` (or the
+   mismatches are folded back into them) go on to the kernel.
 2. **Build the kernel**: GitHub Actions -> `xnu` workflow with
    `machine_config=GUACAMOLE`; artifact `kernel.development.guacamole`.
 3. **Build the ADT + payload + boot image**:
    ```sh
-   python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem
+   python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem \
+       [--dram-size 0x180000000]     # 8 GB SKU; matches the report's MEM line
    python3 tools/mkpayload.py xnu/out/kernel.development.guacamole shim/out/guacamole.adt \
        shim/out/payload-guac.bin --cmdline 'debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30'
    BOARD=guacamole DTB=dtb/boot_unpacked/dtb shim/build.sh ../shim/out/payload-guac.bin
    ```
    Start with `cpus=1`. The iOS root image is the same iPhone X build as on
    sweet (`tools/mkiosroot.sh`, or reuse an existing `ios16-root*.simg`).
-4. **Boot it** (`fastboot boot shim/out/shim-boot.img`) and watch the panel:
-   the shim console is the first thing that must appear.
+4. **Boot it** (`fastboot boot shim/out/shim-boot.img`): with a payload the
+   shim prints `LOADER xnu jumping` and the kernel console takes over the
+   panel; without one it falls back to the report above.
 5. **Logs**: the persistent console ring in `userdata` works once the UFS
    driver is up (`tools/sweet-log-pull.sh` from recovery). No serial port.
 6. **Then**, in order: UFS root + HFS+ (verify UFS 3.0 link), power key via

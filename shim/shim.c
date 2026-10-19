@@ -11,6 +11,7 @@
 #include "console.h"
 #include "mmu.h"
 #include "loader.h"
+#include "probe.h"
 #include "ufs.h"
 
 #define RESTART_BOOTLOADER	0x77665500U
@@ -367,6 +368,9 @@ void shim_main(uint64_t dtb)
 {
 	struct mmu_info mi;
 
+	/* The console is about to paint over ABL's splash: keep pixel facts. */
+	probe_fb_capture();
+
 	/* An xnu payload in the ramdisk means: boot it (MMU stays off). */
 	stage = "loader";
 	con_clear(RED);
@@ -377,12 +381,19 @@ void shim_main(uint64_t dtb)
 	con_str("LOADER", why);
 	con_skip();
 
-	/* No payload: probe the internal UFS while the MMU is still off. */
+	/*
+	 * No payload (or the payload failed to start): bring-up report from
+	 * the live FDT - this is what a first boot on a new board runs.
+	 */
+	stage = "probe";
+	probe_report(dtb);
+	con_skip();
+
+	/* Also probe the internal UFS while the MMU is still off. */
 	stage = "ufs";
 	test_ufs();
 	con_skip();
-	/* Keep the probe results on screen (later tests clear it); reset after 3 min. */
-	con_str("UFS", "probe done, reset in ~3 min");
+	con_str("PROBE", "done, reset in ~3 min");
 	delay_ms(180000);
 	reset(20);
 

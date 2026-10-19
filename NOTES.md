@@ -15,6 +15,16 @@
   combos); sweet shim `out/Image` byte-identical (modulo the new BOARD banner line) and
   guacamole shim builds; full replay (stage + 85 patches + 0082, CI order) applies cleanly
   and the result equals the development tree.
+- **Bootable loader for the first phone contact**: `shim/probe.c` - with no payload (or a
+  failed one) the shim prints the live-FDT bring-up report: DTB/root identity, MEM banks,
+  RSVD carve-outs (splash 0x9C000000+36 MiB), GIC/TMR/SPMI/UFS/USB/DWC3/HSPHY/QMPPHY/TLMM/
+  GCC/RSC/IMEM/PSHOLD, /chosen, CPUS MPIDRs, pre-console FB pixel stats, then the UFS
+  probe; self-reset after ~3 min. Rows/cols adapt to the panel (guacamole 58x64,
+  sweet 43x50). Host-renderable without a phone: `tools/mkfdt-test.py` +
+  `shim/out/host_test FILE.dtb` -> `out/probe.ppm` (both boards rendered and checked;
+  an unrelated 327 KB MT6895 tree was fed in once as a foreign-tree robustness input for
+  the parser only - no non-Qualcomm DTB is used by any build or shipped image).
+  `shim/build.sh` with no payload argument builds exactly this probe image.
 - Values: board facts from the LineageOS oneplus_sm8150 DTS (project dir 18821) and the
   mainline guacamole DTS - splash `cont_splash_region` 0x9C000000 (36 MiB, mainline uses
   the same range as a simple-framebuffer), panel S6E3HC2 1440x3120, touch **Samsung

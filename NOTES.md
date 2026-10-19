@@ -119,6 +119,20 @@
   post-configure pin readback. cmd-db facts verified: header 144 B, entry 24 B, hw types
   ARC=3/VRM=4/BCM=5, rail resource name "ldoa17" (parent node rpmh-regulator-ldoa17),
   DT init voltage 3008 mV.
+- **ROOT CAUSE of the dead touch pins (found 2026-10-19 late evening): the SM8150 TLMM is
+  four tile arrays, not one flat `0x1000*id` array.** The `pinctrl@03000000` region
+  (size 0xdc2000) holds west (+0x100000), east (+0x500000), north (+0x900000) and
+  south (+0xD00000) arrays with pins at `tile + 0x1000*gpio`. The vendor driver says so
+  (`ctl_reg = base + REG_SIZE*id` with those four bases; `UFS_RESET(..., 0xdb6000)` =
+  south + reset offset; SDC2 at 0x9b2000 = north + offset) and mainline indexes through
+  per-tile regs as well (`msm_readl_*` -> `pctrl->regs[g->tile] + reg`, tiles from named
+  resources). Addressing the region without the tile offset is a hole: every read returns
+  0, every write is dropped, no fault and no EDL - which is exactly what the shim probe
+  showed (`TLMM pins 0`, `wr old=0 new=0`), and why the 1.8 V enable (gpio119), the reset
+  (gpio54) and the SE17 mux (gpio55/56, all SOUTH) never took effect while GCC/SE/RPMh
+  (different regions) were fine. Touch pin tiles: panel reset gpio6, touch 54/55/56/119/122
+  are SOUTH; the shim's gpio104 test pin is NORTH. Both the kernel driver and the shim
+  probe now carry the tile map.
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

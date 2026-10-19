@@ -270,10 +270,10 @@ index 03defe6..5bbddb8 100644
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_touch_sec.c b/bsd/dev/sweet_touch_sec.c
 new file mode 100644
-index 0000000..1e7c0df
+index 0000000..a7dba8a
 --- /dev/null
 +++ b/bsd/dev/sweet_touch_sec.c
-@@ -0,0 +1,767 @@
+@@ -0,0 +1,769 @@
 +/*
 + * OnePlus 7 Pro (guacamole, SM8150) touch: Samsung S6SY761 over the GENI I2C
 + * serial engine 17 (qupv3 wrap2 S0, base 0xc80000, address 0x48).
@@ -892,7 +892,9 @@ index 0000000..1e7c0df
 +
 +	printf("SWEET TOUCH: mapping GCC/TLMM/SE17\n");
 +	ts.gcc = ml_io_map(SWEET_DEV_TOUCH_GCC_PA, 0x100000);
-+	ts.gpio = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA, 0x100000);
++	/* The whole region (live tree pinctrl@03000000 size 0xdc2000) holds the
++	 * four tile arrays; the touch pins live at +0xD00000, so map it all. */
++	ts.gpio = ml_io_map(SWEET_DEV_TOUCH_NORTH_PA, 0xe00000);
 +	ts.se = ml_io_map(SWEET_DEV_TOUCH_SE_PA, 0x4000);
 +	if (!ts.gcc || !ts.gpio || !ts.se) {
 +		printf("SWEET TOUCH: MMIO mapping failed\n");

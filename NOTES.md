@@ -2,6 +2,35 @@
 
 ## Agent handoff / active work (2026-10-15, latest)
 
+### 2026-10-19 (late): XNU BOOTS ON THE GM1910
+- CI via the fork **wochgn/ios-sweet** (the account has no push rights to dipa-studio;
+  `gh` device-flow login). Four GUACAMOLE builds to green, each fixing a real porting bug:
+  header export (`pexpert/pexpert/arm64/Makefile` PRIVATE_KERNELFILES missed GUACAMOLE.h /
+  sweet_dev.h), arch filter (`MakeInc.def` must keep GUACAMOLE on plain arm64, not arm64e),
+  build glue (`bsd/conf`, `libkern/conf` Makefile.template gated on `SWEET`), and the
+  platform/CPU IONameMatch. Artifact: `kernel.development.guacamole` (run 39205264491,
+  SHA256 afb6d16e…), 17 MB.
+- **Boot 1** (no rd=): `panic: Unable to find driver for this platform` - KernelConfigTables
+  matched 'xiaomi,sweet' / 'qcom,kryo470'; the guacamole ADT carries 'oneplus,guacamole' /
+  'qcom,kryo485'. Fixed board-aware in patch 0082.
+- **Boot 2** (no rd=, cpus=1): platform expert registered, SweetCPU + PSCI, workqueue
+  self-tests PASSED, ifnet(lo0/gif0/stf0), HFS-627.100.6 + pthreads-114.100.2 + AMFI +
+  Sandbox, HID buttons/touch, battery, and
+  **`SWEET FB: AppleCLCD 1440x3120 stride 5760 at 0x9c000000, default surface 1`** - the
+  display service runs on the phone. Then silence: the kernel sits in IOFindBSDRoot's
+  silent wait for a root device (arm64 suppresses the "Still waiting" print; no rd= was
+  given). Expected state, not a hang.
+- Next: UFS test boot with `rd=ufsroot0` **read-only** (no ufsrw/rootrw - Android's userdata
+  must not be written until the user approves replacing it). If the driver's first register
+  reads hang (the shim probe did), the SM8150 UFS host needs its GCC clocks/GDSC powered up
+  by the driver instead of assuming ABL left it running.
+- Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
+  `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
+  shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole
+  DTB=../dtb/boot_unpacked/dtb ./build.sh ../shim/out/payload-X.bin)`; then
+  `fastboot boot shim/out/shim-boot.img`. The kernel is pushed but **not yet** in
+  dipa-studio: the work lives on the fork (`git remote fork`).
+
 ### 2026-10-19 (night): PROBE BOOT VERIFIED on the GM1910
 - Three `fastboot boot shim/out/shim-boot.img` runs on the phone. **The live-FDT
   report renders on the panel** - the ABL splash handover (0x9C000000, 1440x3120)

@@ -6,12 +6,16 @@ runs the unmodified iPhone X iOS 16.7.16 userland, and keeps its HFS+ root
 inside the `userdata` partition.** Nothing about the userland, the ADT
 identity (`D22AP` / `iPhone10,3`) or the root image changes.
 
-Status: **probe boot verified on a real OnePlus 7 Pro (2026-10-19).**
-The parameterization (ADT, shim, kernel machine config) is in place, the
-probe image boots from the stock ABL, takes over its splash framebuffer,
-renders the live-FDT report on the panel, counts down 180 s and resets
-cleanly back to Android. No XNU kernel has been built or booted on the
-device yet (`machine_config=GUACAMOLE` CI + payload are the next step).
+Status: **XNU boots on a real OnePlus 7 Pro (2026-10-19).** The GUACAMOLE
+kernel (built by CI on the `wochgn` fork) comes up from the stock ABL with
+`fastboot boot`, takes over the 1440x3120 splash framebuffer and brings up
+the platform: device-tree platform expert, SweetCPU/PSCI (cpus=1), workqueue
+self-tests, network stack, HFS+pthreads+AMFI+Sandbox, HID buttons/touch,
+battery, and the display service (`SWEET FB: AppleCLCD 1440x3120 stride 5760
+at 0x9c000000`). It then waits for a root device, which is expected: the
+iOS root image is not installed and Android's userdata must not be touched
+until the user approves replacing it. Nothing is flashed - every test is a
+temporary `fastboot boot`.
 
 ## Where the device lives in the tree
 

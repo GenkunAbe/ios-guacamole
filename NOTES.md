@@ -39,6 +39,21 @@
   /chosen/memory-map RAMDisk = <pa,size> for IOFindBSDRoot. This exercises vfs/HFS/exec
   without touching the phone's storage; with no /sbin/launchd the expected end is a
   load_init_program panic.
+- **Boot 3 (md0, 2026-10-19 late): the whole storage path is proven on the phone.**
+  `Added memory device md0`, `BSD root: md0 major 1 minor 0`, `hfs: Initializing the
+  journal`, **`hfs: mounted SweetRoot on device b(1, 0)`**, then
+  `load_init_program: attempting to load /sbin/launchd` ->
+  `panic: Process 1 exec of /sbin/launchd failed, errno 2` (expected: the test volume has
+  no userland). XNU on the GM1910 now does platform -> UFS -> vfs -> HFS+ journaled mount ->
+  exec. What remains for a real userland is the iPhone X 16.7.16 root filesystem.
+- Next big step: build that root image (IPSW -> HFSX) and put it in `userdata`; **flashing
+  userdata erases Android on this phone - the user must approve explicitly** (it is the same
+  approach as sweet, but this is a different device than the 2026-10-15 approval).
+  Tooling path chosen: IPSW (unzip) -> OS.dmg (APFS) read without root (7z or apfs-fuse if
+  available/buildable) -> write files into an HFSX image with the `hfsplus` userspace tools
+  (hpcopy; no loop mount, no root) -> img2simg -> fastboot flash userdata. mkiosroot.sh
+  currently assumes sudo + loop mount, so either the user provides sudo on this machine or
+  the tooling is switched to the userspace path.
 - Boot recipe used: `python3 tools/mkadt.py shim/out/guacamole.adt --device guacamole --highmem`;
   `python3 tools/mkpayload.py xnu/out-guacamole/kernel.development.guacamole shim/out/guacamole.adt
   shim/out/payload-X.bin --cmdline '<args>'`; `(cd shim && BOARD=guacamole

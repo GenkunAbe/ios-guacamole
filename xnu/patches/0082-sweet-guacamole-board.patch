@@ -222,7 +222,7 @@ index 03defe6..8beaa3d 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..072d4dc 100644
+index b6c1a41..7bbb327 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,7 @@
@@ -242,17 +242,35 @@ index b6c1a41..072d4dc 100644
  #include <kern/locks.h>
  #include <sys/kpi_mbuf.h>
  #include <sys/kpi_socket.h>
-@@ -42,7 +43,7 @@ void sweet_usb_probe(void);
+@@ -42,27 +43,27 @@ void sweet_usb_probe(void);
  static void sweet_usb_gadget_start(vm_offset_t dwc);
  extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
  
 -#define GCC_PA                  0x00100000
 +#define GCC_PA                  SWEET_DEV_USB_GCC_PA
  #define GCC_SIZE                0x00090000
- #define GCC_USB30_PRIM_GDSCR    0x0f004         /* bit 31: power on */
+-#define GCC_USB30_PRIM_GDSCR    0x0f004         /* bit 31: power on */
++#define GCC_USB30_PRIM_GDSCR    SWEET_DEV_USB_GDSCR	/* bit 31: power on */
  #define CBCR_CLK_OFF            (1u << 31)
-@@ -60,9 +61,9 @@ static const struct {
- 	{ "clkref", 0x8c010 },
+ 
+ static const struct {
+ 	const char *name;
+ 	uint32_t    off;
+ } usb_cbcr[] = {
+-	{ "master", 0x0f010 },
+-	{ "sleep", 0x0f014 },
+-	{ "utmi", 0x0f018 },
+-	{ "cfg-noc-axi", 0x0502c },
+-	{ "aggre-axi", 0x8201c },
+-	{ "ahb2phy", 0x6a004 },
+-	{ "clkref", 0x8c010 },
++	{ "master", SWEET_DEV_USB_CBCR_MASTER },
++	{ "sleep", SWEET_DEV_USB_CBCR_SLEEP },
++	{ "utmi", SWEET_DEV_USB_CBCR_UTMI },
++	{ "cfg-noc-axi", SWEET_DEV_USB_CBCR_CFGNOC },
++	{ "aggre-axi", SWEET_DEV_USB_CBCR_AGGRE },
++	{ SWEET_DEV_USB_CBCR_AUX_NAME, SWEET_DEV_USB_CBCR_AUX },
++	{ "clkref", SWEET_DEV_USB_CBCR_CLKREF },
  };
  
 -#define DWC3_PA                 0x0a600000
@@ -733,10 +751,10 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..d9e479e
+index 0000000..d72e155
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,149 @@
 +#ifndef _PEXPERT_ARM64_SWEET_DEV_H
 +#define _PEXPERT_ARM64_SWEET_DEV_H
 +
@@ -809,13 +827,24 @@ index 0000000..d9e479e
 +/* USB: usb0 = ssusb@a600000 (dwc3@a600000, 0xcd00) + hsphy@88e2000 (HS,
 + * 0x110) + ssphy@88e8000 (QMP USB3/DP, 0x3000, vdd pm8150_l18) +
 + * eud@88e0000; QSCRATCH = core + 0xf8800 = 0xa6f8800 (confirmed from
-+ * dwc3-msm.c); extcon is the PM8150B PD PHY (SID 2). The GCC CBCR/GDSC
-+ * offsets are still unmapped -> disabled. */
-+#define SWEET_DEV_USB           0
++ * dwc3-msm.c); extcon is the PM8150B PD PHY (SID 2). The GCC clock
++ * registers come from mainline gcc-sm8150.c (GDSCR 0xf004; CBCRs
++ * 0xf010/0xf014/0xf018, cfg-noc 0xf078, aggre 0xf07c, phy aux 0xf050,
++ * clkref 0x8c008). No ahb2phy clock on this SoC. */
++#define SWEET_DEV_USB           1
 +#define SWEET_DEV_USB_GCC_PA    0x00100000u
 +#define SWEET_DEV_USB_DWC3_PA   0x0a600000u
 +#define SWEET_DEV_USB_QUSB2_PA  0x088e2000u
 +#define SWEET_DEV_USB_QSCRATCH_PA 0x0a6f8800u
++#define SWEET_DEV_USB_GDSCR     0x0f004u
++#define SWEET_DEV_USB_CBCR_MASTER 0x0f010u
++#define SWEET_DEV_USB_CBCR_SLEEP  0x0f014u
++#define SWEET_DEV_USB_CBCR_UTMI   0x0f018u
++#define SWEET_DEV_USB_CBCR_CFGNOC 0x0f078u
++#define SWEET_DEV_USB_CBCR_AGGRE  0x0f07cu
++#define SWEET_DEV_USB_CBCR_AUX    0x0f050u	/* USB3 PHY aux */
++#define SWEET_DEV_USB_CBCR_AUX_NAME "phy-aux"
++#define SWEET_DEV_USB_CBCR_CLKREF 0x8c008u
 +
 +/* Panel physical size in mm (digitizer reporting). */
 +#define SWEET_DEV_PANEL_MM_W    76
@@ -855,6 +884,15 @@ index 0000000..d9e479e
 +#define SWEET_DEV_USB_DWC3_PA   0x0a600000u
 +#define SWEET_DEV_USB_QUSB2_PA  0x088e2000u
 +#define SWEET_DEV_USB_QSCRATCH_PA 0x0a6f8800u
++#define SWEET_DEV_USB_GDSCR     0x0f004u
++#define SWEET_DEV_USB_CBCR_MASTER 0x0f010u
++#define SWEET_DEV_USB_CBCR_SLEEP  0x0f014u
++#define SWEET_DEV_USB_CBCR_UTMI   0x0f018u
++#define SWEET_DEV_USB_CBCR_CFGNOC 0x0502cu
++#define SWEET_DEV_USB_CBCR_AGGRE  0x8201cu
++#define SWEET_DEV_USB_CBCR_AUX    0x6a004u	/* ahb2phy */
++#define SWEET_DEV_USB_CBCR_AUX_NAME "ahb2phy"
++#define SWEET_DEV_USB_CBCR_CLKREF 0x8c010u
 +
 +#define SWEET_DEV_TOUCH         1
 +#define SWEET_DEV_KEYS_VOLUME   1   /* GPIO2 volume-up + PON RESIN volume-down */

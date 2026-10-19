@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..ac8c811 100644
+index b6c1a41..1b623e7 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -261,11 +261,24 @@ index b6c1a41..ac8c811 100644
  #include <kern/locks.h>
  #include <sys/kpi_mbuf.h>
  #include <sys/kpi_socket.h>
-@@ -42,27 +46,27 @@ void sweet_usb_probe(void);
+@@ -42,27 +46,40 @@ void sweet_usb_probe(void);
  static void sweet_usb_gadget_start(vm_offset_t dwc);
  extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
  
 -#define GCC_PA                  0x00100000
++/*
++ * Qualcomm wrapper registers ("QSCRATCH", core base + 0xf8800). The
++ * controller only connects (pull-up on D+) while it sees a valid VBUS
++ * session; Linux dwc3-qcom forces that in software when the charger
++ * reports a cable (dwc3_qcom_vbus_override_enable).
++ */
++#define QSCRATCH_PA             SWEET_DEV_USB_QSCRATCH_PA
++#define QSCRATCH_HS_PHY_CTRL    0x10
++#define   UTMI_OTG_VBUS_VALID   (1u << 20)
++#define   SW_SESSVLD_SEL        (1u << 28)
++#define QSCRATCH_SS_PHY_CTRL    0x30
++#define   LANE0_PWR_PRESENT     (1u << 24)
++
 +#define GCC_PA                  SWEET_DEV_USB_GCC_PA
  #define GCC_SIZE                0x00090000
 -#define GCC_USB30_PRIM_GDSCR    0x0f004         /* bit 31: power on */
@@ -300,7 +313,7 @@ index b6c1a41..ac8c811 100644
  #define QUSB2_SIZE              0x00000400
  
  static uint32_t
-@@ -132,6 +136,13 @@ sweet_usb_probe(void)
+@@ -132,6 +149,13 @@ sweet_usb_probe(void)
  	 * PLL_CORE_INPUT_OVERRIDE 0x0a8, TEST1 0x254. */
  	printf("SWEET USB: QUSB2 PLL_STATUS 0x%08x PWR_CTRL1 0x%08x PORT_TUNE1 0x%08x TEST1 0x%08x\n",
  	    usb_rd(phy, 0x1a0), usb_rd(phy, 0x210), usb_rd(phy, 0x240), usb_rd(phy, 0x254));
@@ -314,15 +327,26 @@ index b6c1a41..ac8c811 100644
  }
  
  /*
-@@ -167,7 +178,7 @@ sweet_usb_probe(void)
-  * session; Linux dwc3-qcom forces that in software when the charger
-  * reports a cable (dwc3_qcom_vbus_override_enable).
-  */
+@@ -161,19 +185,6 @@ sweet_usb_probe(void)
+ #define DEPCMDPAR0(n)   (0xc808 + 0x10 * (n))
+ #define DEPCMD(n)       (0xc80c + 0x10 * (n))
+ 
+-/*
+- * Qualcomm wrapper registers ("QSCRATCH", core base + 0xf8800). The
+- * controller only connects (pull-up on D+) while it sees a valid VBUS
+- * session; Linux dwc3-qcom forces that in software when the charger
+- * reports a cable (dwc3_qcom_vbus_override_enable).
+- */
 -#define QSCRATCH_PA             0x0a6f8800
-+#define QSCRATCH_PA             SWEET_DEV_USB_QSCRATCH_PA
- #define QSCRATCH_HS_PHY_CTRL    0x10
- #define   UTMI_OTG_VBUS_VALID   (1u << 20)
- #define   SW_SESSVLD_SEL        (1u << 28)
+-#define QSCRATCH_HS_PHY_CTRL    0x10
+-#define   UTMI_OTG_VBUS_VALID   (1u << 20)
+-#define   SW_SESSVLD_SEL        (1u << 28)
+-#define QSCRATCH_SS_PHY_CTRL    0x30
+-#define   LANE0_PWR_PRESENT     (1u << 24)
+-
+ #define DCTL_RUN_STOP   (1u << 31)
+ #define DCTL_CSFTRST    (1u << 30)
+ #define DSTS_DEVCTRLHLT (1u << 22)
 @@ -854,6 +865,7 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  	thread_t thread;
  

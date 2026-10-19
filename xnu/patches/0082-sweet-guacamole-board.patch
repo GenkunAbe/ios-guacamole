@@ -238,7 +238,7 @@ index 03defe6..723d314 100644
 +}
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/sweet_usb.c b/bsd/dev/sweet_usb.c
-index b6c1a41..5cb4d57 100644
+index b6c1a41..3376d0c 100644
 --- a/bsd/dev/sweet_usb.c
 +++ b/bsd/dev/sweet_usb.c
 @@ -10,7 +10,10 @@
@@ -539,7 +539,7 @@ index b6c1a41..5cb4d57 100644
  	/* Endpoint 0 OUT/IN: start config, control type, max packet 512 until connect done. */
  	if (ud_epcmd(0, DEPCMD_DEPSTARTCFG, 0, 0, 0) ||
  	    ud_epcmd(0, DEPCMD_SETEPCONFIG, (0u << 1) | (512u << 3), (1u << 8) | (1u << 10) | (0u << 25), 0) ||
-@@ -899,26 +1015,72 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -899,26 +1015,78 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		printf("SWEET USB: endpoint 0 setup failed\n");
  		return;
  	}
@@ -570,13 +570,13 @@ index b6c1a41..5cb4d57 100644
 +	usb_mark(SWEET_USB_MARK_STEP4_OK);
 +	printf("SWEET USB:   - step 4 done\n");
  
-+	int vbus = 1;
++	int vbus = SWEET_DEV_USB_VBUS_DEFAULT;
 +	(void)PE_parse_boot_argn("sweetvbus", &vbus, sizeof(vbus));
 +	if (maxstep < 5) {
 +		printf("SWEET USB: stopping before step 5 (sweetusbstep=%d)\n", maxstep);
 +		return;
 +	}
-+	printf("SWEET USB: gadget step 5: QSCRATCH%s\n", vbus ? "" : " (read only, sweetvbus=0)");
++	printf("SWEET USB: gadget step 5: QSCRATCH mode %d (0 none, 1 HS, 2 HS+SS)\n", vbus);
 +	usb_mark(SWEET_USB_MARK_STEP5);
  	vm_offset_t qs = ml_io_map(QSCRATCH_PA, 0x100);
  	if (qs != 0) {
@@ -588,12 +588,18 @@ index b6c1a41..5cb4d57 100644
 -		__asm__ volatile ("dsb sy" ::: "memory");
 -		printf("SWEET USB: VBUS override on: HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x\n",
 -		    usb_rd(qs, QSCRATCH_HS_PHY_CTRL), usb_rd(qs, QSCRATCH_SS_PHY_CTRL));
-+		if (vbus) {
++		if (vbus >= 1) {
++			printf("SWEET USB:   - HS VBUS override write\n");
 +			*(volatile uint32_t *)(qs + QSCRATCH_HS_PHY_CTRL) = hs | UTMI_OTG_VBUS_VALID | SW_SESSVLD_SEL;
++			__asm__ volatile ("dsb sy" ::: "memory");
++			hs = usb_rd(qs, QSCRATCH_HS_PHY_CTRL);
++			printf("SWEET USB:   - HS_PHY_CTRL now 0x%08x\n", hs);
++		}
++		if (vbus >= 2) {
++			printf("SWEET USB:   - SS PHY write\n");
 +			*(volatile uint32_t *)(qs + QSCRATCH_SS_PHY_CTRL) = ss | LANE0_PWR_PRESENT;
 +			__asm__ volatile ("dsb sy" ::: "memory");
-+			printf("SWEET USB: VBUS override on: HS_PHY_CTRL 0x%08x SS_PHY_CTRL 0x%08x\n",
-+			    usb_rd(qs, QSCRATCH_HS_PHY_CTRL), usb_rd(qs, QSCRATCH_SS_PHY_CTRL));
++			printf("SWEET USB:   - SS_PHY_CTRL now 0x%08x\n", usb_rd(qs, QSCRATCH_SS_PHY_CTRL));
 +		}
  	}
  
@@ -618,7 +624,7 @@ index b6c1a41..5cb4d57 100644
  	if (kernel_thread_start(ud_thread, NULL, &thread) == KERN_SUCCESS) {
  		thread_deallocate(thread);
  	}
-@@ -928,4 +1090,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
+@@ -928,4 +1096,15 @@ sweet_usb_gadget_start(vm_offset_t dwc)
  		thread_deallocate(thread);
  	}
  }
@@ -1091,10 +1097,10 @@ index 88e524a..121d6c5 100644
  
 diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
 new file mode 100644
-index 0000000..b4ba179
+index 0000000..83f940d
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/sweet_dev.h
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,169 @@
 +#ifndef _PEXPERT_ARM64_SWEET_DEV_H
 +#define _PEXPERT_ARM64_SWEET_DEV_H
 +
@@ -1168,6 +1174,10 @@ index 0000000..b4ba179
 + * issued before the host has reset the bus, so arm ep0 on USB reset /
 + * XferNotReady instead of at bring-up. */
 +#define SWEET_DEV_USB_ARM_ON_EVENT 1
++/* QSCRATCH VBUS override: 0 none, 1 HS only, 2 HS + SS. The SS PHY on this
++ * board is the USB3/DP combo (QMP) that ABL drives for the display; writing
++ * SS_PHY_CTRL wedges the bus, so only override the HS side by default. */
++#define SWEET_DEV_USB_VBUS_DEFAULT 1
 +#define SWEET_DEV_TOUCH_SE_PA   0x00c80000u
 +#define SWEET_DEV_TOUCH_GCC_PA  0x00100000u
 +#define SWEET_DEV_TOUCH_NORTH_PA 0x03000000u     /* live tree pinctrl@03000000 */
@@ -1250,6 +1260,7 @@ index 0000000..b4ba179
 +#define SWEET_DEV_TOUCH_VREG_MV 3200
 +#define SWEET_DEV_MARK_PA       0x118000000UL
 +#define SWEET_DEV_USB_ARM_ON_EVENT 0
++#define SWEET_DEV_USB_VBUS_DEFAULT 2
 +#define SWEET_DEV_KEYS_VOLUME   1   /* GPIO2 volume-up + PON RESIN volume-down */
 +
 +/* Panel physical size in mm (digitizer reporting). */

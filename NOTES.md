@@ -2,6 +2,20 @@
 
 ## Agent handoff / active work (2026-10-21, latest)
 
+### Session handoff (2026-10-21 end)
+- **Verified:** patch 0085 (CX GDSC power-up) on hardware; iOS still reaches
+  SpringBoard. **Negative:** patch 0086 (GX GDSC alone) never asserts PWR_UP.
+- **Built, not yet booted:** patch 0087 (read-only ARC table dump), CI run
+  `39467303644` green, artifact under `/tmp/opencode/art-0087`, boot image
+  `/tmp/opencode/img-gpu-0087.img` (`sweetgpu=3`).
+- **Device:** GM1910 `d3109478` is in OrangeFox recovery with root adb; only
+  `fastboot boot` images were used, no partition was written.
+- **Next:** boot `img-gpu-0087.img`, wait for the iOS desktop, Power+Volume-Down
+  to fastboot, `fastboot boot /home/invalidname/下载/橙狐Rec_7Pro.img`, tap
+  sideload, then `tools/sweet-log-pull.sh logs/gpu-0087-2026-10-21.txt` and read
+  the `SWEET RPMH: arc gfx.lvl/cx.lvl/mx.lvl` lines. Do not vote any rail until
+  the dependent MX index is chosen from those tables.
+
 ### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
 - **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**
   Observed today on GM1910:

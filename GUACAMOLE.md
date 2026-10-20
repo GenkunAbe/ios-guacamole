@@ -6,16 +6,26 @@ runs the unmodified iPhone X iOS 16.7.16 userland, and keeps its HFS+ root
 inside the `userdata` partition.** Nothing about the userland, the ADT
 identity (`D22AP` / `iPhone10,3`) or the root image changes.
 
-Status: **XNU boots on a real OnePlus 7 Pro (2026-10-19).** The GUACAMOLE
-kernel (built by CI on the `wochgn` fork) comes up from the stock ABL with
-`fastboot boot`, takes over the 1440x3120 splash framebuffer and brings up
-the platform: device-tree platform expert, SweetCPU/PSCI (cpus=1), workqueue
-self-tests, network stack, HFS+pthreads+AMFI+Sandbox, HID buttons/touch,
-battery, and the display service (`SWEET FB: AppleCLCD 1440x3120 stride 5760
-at 0x9c000000`). It then waits for a root device, which is expected: the
-iOS root image is not installed and Android's userdata must not be touched
-until the user approves replacing it. Nothing is flashed - every test is a
-temporary `fastboot boot`.
+Status (2026-10-20): **the port boots to the iOS home screen on a real OnePlus
+7 Pro.** With the guacamole ADT (which must include the D22AP `/product`), the
+`GUACAMOLE` kernel built by CI on the `wochgn/ios-guacamole` fork and the
+Setup-skipped iOS 16.7.16 root image in `userdata`:
+
+- the stock ABL starts `fastboot boot` and keeps scanning out the 1440x3120
+  splash framebuffer at `0x9c000000`;
+- XNU brings up 8/8 CPUs over PSCI, GICv3, the timer, UFS and the iOS root
+  (HFS+, read/write), then launchd and the daemons;
+- backboardd/SpringBoard start, the home screen renders (CoreAnimation software
+  renderer, letterboxed 1125x2436 into the panel, 30 Hz CPU copy), apps open;
+- the S6SY761 touch panel works over the bit-bang I2C transport.
+
+The setup wizard itself starts and renders, but hangs after "Don't transfer app
+& data", so the working image is the one that skips Setup. Nothing is flashed
+except `userdata`; every kernel test is a temporary `fastboot boot`.
+
+Historical first contact (2026-10-19): the same kernel reached the display
+service and sat in the root-device wait - expected, because no iOS root was
+installed yet.
 
 ## Where the device lives in the tree
 
@@ -206,25 +216,25 @@ recovery with `adb root` for log pulls.
    `SWEET_DEV_USB` can be flipped back on.
 4. **Battery**: smb5 is on SID 2 with a different register map than sweet's
    PM6150 charger; the SweetBattery service will need a device branch.
-5. **RPMh**: RSC/DRV-2 (0x18220000) and TCS (0x18220d00) are confirmed; the
-   command-DB address (sweet: 0xc3f0000c) still needs the live-FDT check
-   before touch power can be voted on. The touch rail is `ldoa17`.
+5. ~~**RPMh**~~ **resolved**: RSC/DRV-2 at `0x18220000`, TCS at `0x18220d00`,
+   command-DB locator at `0x0c3f000c` (`qcom,cmd-db@c3f000c`, an 8-byte
+   {base,size} pair). The touch rail is `ldoa17` (`addr=0x41300`, 3008 mV).
 
 ## Risks
 
-- **Splash framebuffer**: the reserved-memory region is audited on the phone
-  (0x9C000000 + 36 MiB, matching the mainline port's simple-framebuffer), so
-  the address is right; whether OnePlus's ABL keeps the panel lit across
-  `fastboot boot` is the one thing only the probe boot can prove. If it does
-  not, a real DSI/DSC panel driver becomes necessary (much larger job; the
-  panel init sequence is in the dtbo's `dsi-panel-samsung_oneplus_dsc`).
+- ~~**Splash framebuffer**~~ **resolved**: the ABL keeps the panel lit across
+  `fastboot boot` and scans out `0x9c000000` (36 MiB), so no DSI/DSC driver is
+  needed (the panel init sequence stays in the ABL).
 - **Memory holes**: the live `/memory` already excludes the mem-offline
-  window and the 69 MiB hole; the port's upper-bank choice sits entirely
-  inside a listed bank. Check the report's MEM lines against
-  `tools/devices.py` on any other unit/SKU.
-- **SMP**: MPIDRs (0x0..0x700) and PSCI (`smc`) are confirmed, but CPU_ON
-  behaviour of the three clusters on production firmware is not; start with
-  `cpus=1` and add cores one at a time.
+  window and the 69 MiB hole. The default profile uses `0xc0000000` + 3 GiB;
+  `--highmem` uses the 4 GiB upper bank at `0x180000000`. Check the report's
+  MEM lines against `tools/devices.py` on any other unit/SKU.
+- ~~**SMP**~~ **resolved**: `cpus=8` starts all eight cores (MPIDRs `0x0..0x700`,
+  PSCI `smc`); `cpus=1` remains the fallback.
+- **Setup wizard**: it renders but hangs after "Don't transfer app & data"
+  (unlabelled spinner); the `mobile` session is therefore never created by the
+  wizard and the working images skip Setup. This is the main open issue on the
+  userland side.
 - **UFS 3.0**: the register block is shared, but the link is ABL's to set up;
   same "don't touch the PHY" approach as sweet.
 - **Boot artifacts**: keep `research/ipsw-x/d22ap.adt` (iPhone X `/product`)

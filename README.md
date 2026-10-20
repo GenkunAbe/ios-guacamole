@@ -13,6 +13,14 @@ As of **2026-10-20** the phone boots to the **iOS home screen**: SpringBoard
 renders, apps open, and the touchscreen works. Rendering runs entirely on the CPU;
 there is no GPU driver.
 
+![iOS 16 Settings > General > About on the OnePlus 7 Pro](docs/guacamole-about.jpg)
+
+*iOS 16.7.16 on a OnePlus 7 Pro: Settings > General > About reports "iPhone X",
+17 GB capacity and 4.15 GB available. The panel is letterboxed (1125x2436 canvas
+centred in the 1440x3120 panel).*
+
+[中文说明](README.zh-CN.md)
+
 > Experimental bring-up, not a usable phone OS. Many things are missing or stubbed
 > (see below), and Apple's security model is mostly switched off. It installs into
 > the `userdata` partition and so **erases Android's user data**.

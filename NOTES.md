@@ -54,6 +54,9 @@
   keeps it across `fastboot boot`), withholds a pin that fails the check instead of writing the
   PMIC, and feeds `sweet_hid_key(1/2)`. Boot log: `SWEET KEYS: volup-ppid=0xc5 ... input=1`.
   The patch stack was replay-validated: 0001..0083 reproduces the staging tree exactly.
+  **Verified on the phone 2026-10-20 (img-t28): both keys register (`key=1` / `key=2`) and drive
+  the iOS volume HUD, and the ABL's input/pull-up configuration survived `fastboot boot` as
+  expected (`input=1` for both pins).
 - Payloads rebuilt with the corrected ADT + `/product`: `/tmp/opencode/img-t26.img` (console +
   `sweetlogdump=1`) and `img-t27.img` (noconsole, `sweetfb_hz=30`). Booting t26 on the Setup image
   reached the **real Setup wizard**: Hello -> language -> region -> "App & Data" with all five

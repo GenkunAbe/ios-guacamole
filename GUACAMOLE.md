@@ -205,7 +205,8 @@ recovery with `adb root` for log pulls.
    bit 0, active low. The driver looks up both APIDs, checks MODE_CTL/EN_CTL/
    SUBTYPE (enabled digital input) and withholds a pin the ABL left
    unconfigured. Boot log lines start with `SWEET KEYS: volup-ppid=` /
-   `voldown-ppid=`.
+   `voldown-ppid=`. Verified on hardware 2026-10-20 (img-t28): both keys
+   report `input=1` and drive the iOS volume HUD.
 2. **Touch**: new driver for Samsung S6SY761 over the GENI I2C SE17. The
    protocol has an open reference (mainline `s6sy761` input driver); the
    bring-up needs the same three pieces as sweet: GENI SE bring-up (ABL leaves

@@ -27,9 +27,37 @@
   `dx -= fOffX` (so +157) and clips, i.e. the canvas lands centered with 157/158 px side bars.
   The black screen is therefore not stride or offset: the GUI never presents because the user
   session is dead (usermanagerd falls back to loginwindow, SpringBoard SIGSEGV).
-- Payloads rebuilt with the corrected ADT: `/tmp/opencode/img-t24.img` (console + `sweetlogdump=1`)
-  and `img-t25.img` (noconsole, `sweetfb_hz=30`). Next: boot t24 on the flashed Setup image and
-  read the ring log for usermanagerd/SpringBoard/purplebuddy.
+- **SpringBoard's "bounding path bitmap" crash is missing `/product`, not personas.** On the fresh
+  Setup image SpringBoard still crash-loops with `NSInternalInconsistencyException: Failed to load
+  bounding path bitmap data from the asset manager for asset name: BoundingPathBitmap-1125x2436-
+  375x812-3.00x` (UIKitCore). The asset name comes from `-[NSString stringWithFormat:]` with
+  `BoundingPathBitmap-%ldx%ld-%ldx%ld-%.2fx`; that rendition *exists* in
+  `UIKitCore.framework/BoundingPathData.bundle/Assets.car`. The lookup chain (UIKitCore
+  `___UIKitSharedBoundingPathDataManager` -> `-[_UIAssetManager dataNamed:]` ->
+  `-[CUICatalog dataWithName:]` -> `_dataWithName:deviceIdiom:deviceSubtype:memoryClass:
+  graphicsClass:...`) filters renditions by the device artwork attributes, which MobileGestalt
+  answers from `/product` (`artwork-device-idiom=phone`, `artwork-device-subtype=0x984`,
+  `device-perf-memory-class=4`, `artwork-scale-factor=3`, `graphics-featureset-class=APPLE4`).
+  With `/product` removed the attributes are unknown and the lookup returns nil, so the exception
+  is fatal. sweet never hit this because its ADT always carried the D22AP `/product`.
+  `/product` is restored; the `graphics-featureset-class=APPLE4` Metal worry has to be re-tested
+  on top of the *correct* fbcon ADT (the earlier "garbled" run used the stale sweet fbcon).
+- Payloads rebuilt with the corrected ADT + `/product`: `/tmp/opencode/img-t26.img` (console +
+  `sweetlogdump=1`) and `img-t27.img` (noconsole, `sweetfb_hz=30`). Booting t26 on the Setup image
+  reached the **real Setup wizard**: Hello -> language -> region -> "App & Data" with all five
+  choices rendered by SpringBoard (touch works). Tapping "不传输 App 与数据" then hangs on an
+  unlabelled spinner, so the wizard was not completed; the Setup image is still on the phone's
+  userdata partition unless the skip image was re-flashed.
+- **2026-10-20 evening: the skip-setup image boots to a usable home screen.** Confirmed on the
+  phone: userdata = `iosroot-build/ios16-root-guac.simg` (the original Setup-skipped image),
+  payload = `/tmp/opencode/img-t27.img` (t18 personas kernel + corrected guacamole ADT with the
+  full D22AP `/product`, `sweetfb_noconsole=1 sweetfb_hz=30`) -> SpringBoard home screen, icons
+  present, apps open, touch works, no console overlay. The same image previously died on the
+  bounding-path exception, so the missing `/product` was the single cause of the
+  "icon store fails / SpringBoard SIGSEGV / loginwindow fallback" chain; personas alone were not
+  enough. The Setup image is no longer on the phone (userdata was re-flashed with the skip image).
+  Open items: verify auto-lock/wake (power button), long-run stability and frame rate, and decide
+  whether the mobile session exists in this image (apps launching implies it does).
 
 ### 2026-10-19 (late): XNU BOOTS ON THE GM1910
 - CI via the fork **wochgn/ios-sweet** (the account has no push rights to dipa-studio;

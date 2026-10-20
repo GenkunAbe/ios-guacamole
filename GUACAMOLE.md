@@ -192,17 +192,20 @@ recovery with `adb root` for log pulls.
 5. **Logs**: the persistent console ring in `userdata` works once the UFS
    driver is up (`tools/sweet-log-pull.sh` from recovery). No serial port.
 6. **Then**, in order: UFS root + HFS+ (verify UFS 3.0 link), power key via
-   PON, volume keys (identify the PM8150 GPIO APID, see below), RPMh, the
-   S6SY761 touch driver, USB, live log over USB.
+   PON, volume keys (PM8150 GPIO6/7, see below), RPMh, the S6SY761 touch
+   driver, USB, live log over USB.
 
 ## Next work items
 
-1. **Volume keys**: the GPIO-based key path assumes the *first* arbiter APID
-   with peripheral id 0x4c1 is the volume-up GPIO (that happened to hold on
-   sweet). On guacamole both volume keys are PMIC GPIOs (PM8150 6 and 7), so
-   the driver should scan the 0x4c1 APIDs and log their status/configuration,
-   with a boot-arg to select the APID (the same diagnose-on-hardware pattern
-   used for the GT9896 on sweet). `SWEET_DEV_KEYS_VOLUME` gates this today.
+1. ~~**Volume keys**~~ **implemented (patch 0083)**: the SPMI arbiter addresses
+   a peripheral by PPID = `(SID << 8) | (reg >> 8)`, and an observer command
+   carries only the register's low byte. Every PMIC GPIO pin therefore has its
+   own APID page: PM8150 GPIO6 (volume up) RT_STS `0xc510` -> PPID `0x00c5`,
+   GPIO7 (volume down) `0xc610` -> `0x00c6`, both read at pin offset `0x10`,
+   bit 0, active low. The driver looks up both APIDs, checks MODE_CTL/EN_CTL/
+   SUBTYPE (enabled digital input) and withholds a pin the ABL left
+   unconfigured. Boot log lines start with `SWEET KEYS: volup-ppid=` /
+   `voldown-ppid=`.
 2. **Touch**: new driver for Samsung S6SY761 over the GENI I2C SE17. The
    protocol has an open reference (mainline `s6sy761` input driver); the
    bring-up needs the same three pieces as sweet: GENI SE bring-up (ABL leaves

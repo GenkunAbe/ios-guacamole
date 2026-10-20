@@ -42,6 +42,18 @@
   is fatal. sweet never hit this because its ADT always carried the D22AP `/product`.
   `/product` is restored; the `graphics-featureset-class=APPLE4` Metal worry has to be re-tested
   on top of the *correct* fbcon ADT (the earlier "garbled" run used the stale sweet fbcon).
+- **Volume keys on guacamole (patch 0083).** The key driver was compiled for guacamole but only
+  polled the PON, so power worked and both volume keys were dead. PM8150 volume up/down are GPIO6
+  and GPIO7 (LineageOS 18821 DTS, both active low). The missing piece was the SPMI arbiter
+  addressing: a peripheral is selected by PPID = `(SID << 8) | (reg >> 8)` and an observer
+  command only carries the register's low byte, so every PMIC GPIO *pin* owns a 0x100-byte page
+  and needs its own APID lookup. GPIO6 RT_STS `0xc510` -> PPID `0x00c5`, GPIO7 `0xc610` ->
+  `0x00c6`, both read at offset `0x10` bit 0. (sweet's `0x4c1` = PM6150L SID 4 + page `0xc1`
+  follows the same formula.) The driver now finds both APIDs, reads MODE_CTL/EN_CTL/SUBTYPE to
+  confirm an enabled digital input (the ABL configures these for its own key menu and the PMIC
+  keeps it across `fastboot boot`), withholds a pin that fails the check instead of writing the
+  PMIC, and feeds `sweet_hid_key(1/2)`. Boot log: `SWEET KEYS: volup-ppid=0xc5 ... input=1`.
+  The patch stack was replay-validated: 0001..0083 reproduces the staging tree exactly.
 - Payloads rebuilt with the corrected ADT + `/product`: `/tmp/opencode/img-t26.img` (console +
   `sweetlogdump=1`) and `img-t27.img` (noconsole, `sweetfb_hz=30`). Booting t26 on the Setup image
   reached the **real Setup wizard**: Hello -> language -> region -> "App & Data" with all five

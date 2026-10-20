@@ -133,6 +133,23 @@
   (different regions) were fine. Touch pin tiles: panel reset gpio6, touch 54/55/56/119/122
   are SOUTH; the shim's gpio104 test pin is NORTH. Both the kernel driver and the shim
   probe now carry the tile map.
+- **iOS userland on guacamole: personas, scenes, and the /product trap (2026-10-20).** The icon
+  exception (`Failed to load bounding path bitmap data ... headboardPathBitmaps-1125x2436-375x812
+  -3.0x`) that kept SpringBoard at the Apple logo had a concrete cause: `persona()` (syscall 494)
+  lives in `bsd/kern/sys_persona.c`, which is `optional config_personas`, and the sweet MASTER never
+  enabled it, so `usermanagerd` could not create personas 99/199 and every per-user XPC service
+  (including the icon renderer) failed. Enabled it (`options config_personas` in
+  `config/MASTER.arm64.sweet`); the t18 kernel contains `-DCONFIG_PERSONAS` and
+  `_kpersona_alloc_syscall`. With that build SpringBoard stops crash-looping on a warm cache and
+  launches scenes (`SpringBoard: launching lp root scene`, `PersonaSettingsSubscriber` runs). A
+  freshly flashed userdata still crashes once while the icon cache is rebuilt, so the first boot
+  needs several minutes (the sweet images had all been booted before, which hid this).
+  The `/product` node was added to the ADT from the real D22AP tree (`ipsw img4 im4p extract
+  Firmware/all_flash/DeviceTree.d22ap.im4p` -> `research/ipsw-x/d22ap.adt`, whose /product the
+  sweeps in `tools/mkadt.py` already consumed); it makes the userland report
+  `graphics-featureset-class = APPLE4`, so the window server takes the Metal/AGX path, which this
+  port cannot render yet - the screen goes to garbage/letterbox. Reverted: keep the product node
+  out until a software/CoreGraphics path is forced (see the CA_* knobs in the notes above).
 - **🎉 TOUCH WORKS ON GUACAMOLE (2026-10-19 ~23:25 local, image t10).** Coordinates appear
   on screen when touching (`SWEET TOUCH: f0 down x,y` / `f0 up`), so the full chain is up:
   TLMM tile addressing -> pin config (reset 54, 1.8 V enable 119, IRQ 122, bus 55/56) ->

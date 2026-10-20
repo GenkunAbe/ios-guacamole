@@ -1548,6 +1548,22 @@ index 0000000..e9b6989
 +
 +options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
 +options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+diff --git a/config/MASTER.arm64.sweet b/config/MASTER.arm64.sweet
+index e305f0d..feeaf92 100644
+--- a/config/MASTER.arm64.sweet
++++ b/config/MASTER.arm64.sweet
+@@ -97,6 +97,11 @@ makeoptions	OSFMK_MACHINE = "arm64"				# <mach>
+ 
+ options		COUNT_SYSCALLS		# count bsd system calls 	# <countcalls>
+ options     TRASH_VFP_ON_SAVE   # <debug,trash_vfp>
++# SWEET: the iOS userland (usermanagerd, launchd, XPC services) calls the
++# persona() syscall (494) to create the kernel personas 99/199; sys_persona.c
++# is "optional config_personas" in bsd/conf/files.
++options     config_personas
++
+ options		ALTERNATE_DEBUGGER	# <alternate_debugger>
+ 
+ options   CONFIG_VNODES=1024		# <xsmall>
 diff --git a/iokit/Kernel/arm/SweetFramebuffer.cpp b/iokit/Kernel/arm/SweetFramebuffer.cpp
 index a62416c..3f00a39 100644
 --- a/iokit/Kernel/arm/SweetFramebuffer.cpp

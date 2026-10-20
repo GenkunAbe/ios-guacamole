@@ -72,6 +72,51 @@
   The GPUCC block is readable without wedging the bus. Next step is the RPMh
   CX/GX rail vote plus GDSC power-up (and `GCC_DDRSS_GPU_AXI_CLK` `0x71154`),
   not more clock pokes.
+- **GPU stage 0.2 implemented: CX power-up + RBBM probe (patch 0085).**
+  `xnu/patches/0085-sweet-guacamole-gpu-cx-power.patch` extends
+  `bsd/dev/sweet_gpu.c` with `sweetgpu=2`; commit `211b1b6`, CI run
+  `39463156162` (GUACAMOLE, DEVELOPMENT). Sequence:
+  - enable `GCC_DDRSS_GPU_AXI_CLK` `0x71154` after the three 0084 branches;
+    abort before touching GPUCC if `gcc_gpu_cfg_ahb_clk` still reads gated;
+  - enable the CX GDSC like mainline/VENDOR `gdsc.c`: refuse if
+    `HW_CONTROL` is set, clear `SW_COLLAPSE` in `0x2c9106c`, barrier + 1 us,
+    poll `0x2c91540` BIT(31) for up to 2 ms;
+  - only after CX reports on, enable `gpu_cc_ahb_clk` `0x1078` and
+    `gpu_cc_cxo_clk` `0x109c`, then (only if AHB is on) map
+    `0x2c00000+0x40000` and read `RBBM_STATUS` (dword `0x210`),
+    `RBBM_INT_0_STATUS` (`0x201`), `RBBM_STATUS3` (`0x213`) and the CP
+    always-on counter (`0x980/0x981`).
+  - GX is deliberately untouched: mainline's GX GDSC `power_on` is a no-op and
+    the GX head switch is GMU-owned; its `gfx.lvl` rail is an RPMh ARC vote.
+  - Known gaps: vendor `gpu_cx_gdsc` has `mboxes = <&qmp_aop 0>` and
+    `gdsc-regulator.c` sends `{class: clock, res: gpu_noc_wa}` before clearing
+    collapse. XNU has no AOP mailbox driver, so 0085 does not send it; this is
+    the first suspect if CX power-up times out or the bus misbehaves. ARC
+    metadata (`gfx.lvl`/`cx.lvl`/`mx.lvl`) is also not inspected yet, and the
+    two voted GCC branches stay halted without interconnect votes.
+  - **Hardware-verified 2026-10-21 01:13-01:17** (img-gpu-0085, `sweetgpu=2
+    sweetlogdump=1`, iPhone X 16.7.16 root). The kernel reached SpringBoard and
+    the ring contains:
+    ```
+    SWEET GPU: stage=2
+    SWEET GPU: gcc_ddrss_gpu_axi_clk 0 -> 0x1
+    SWEET GPU: cx before gdscr=0x222001 hw=0x5ff4
+    SWEET GPU: cx after gdscr=0xf8222000 hw=0x80001fe0
+    SWEET GPU: gpu_cc_ahb_clk 0x1 -> 0x1
+    SWEET GPU: gpu_cc_cxo_clk 0x1 -> 0x1
+    SWEET GPU: rbbm status=0 int=0 status3=0
+    SWEET GPU: cp always-on hi=0 lo=0 (no register response)
+    ```
+    `hw` BIT(31) is set, so the CX domain powered up and stayed up; the AOP
+    `gpu_noc_wa` QMP was not needed for this step on this unit. The all-zero
+    RBBM/CP reads are expected while GX is off (the GPU core is in the GX
+    domain and the GMU owns that head switch); they are not evidence of a
+    register-bus failure. The two voted GCC branches remain halted, as before.
+  - Next kernel step: power GX through the GMU path (or a separate, bounded
+    GX experiment with the vendor SW-reset/clamp sequence), then load
+    `a640_gmu.bin`, program the GMU SMMU contexts and start the CM3. The
+    `gfx.lvl` ARC vote and the AOP QMP remain unverified and become relevant
+    before any GX power state is left enabled.
 
 ### 2026-10-20 (later): Setup-intact root image, ADT --dump trap, display geometry
 - **Setup image built and flashed.** `iosroot-build/build-root-setup.sh` copies the iOS 16.7.16

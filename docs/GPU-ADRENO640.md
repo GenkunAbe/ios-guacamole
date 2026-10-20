@@ -1,8 +1,10 @@
 # Adreno 640 (SM8150) GPU 可行性报告
 
-**日期**：2026-10-20
+**日期**：2026-10-20（2026-10-21 更新）
 **对象**：一加 7 Pro（`guacamole`，SM8150 / 骁龙 855，Adreno 640）上的 ios-guacamole 移植
-**状态**：仅分析，未实现任何 GPU 代码。当前系统完全依赖 CoreAnimation 软件渲染。
+**状态**：阶段 0.2 已在真机验证（XNU patch 0085：CX GDSC 上电成功，
+`hw` BIT(31)=1；RBBM 因 GX 仍关闭而读回 0）。当前系统仍完全依赖
+CoreAnimation 软件渲染，没有 GPU 驱动。
 **参考**：[UniXNU/NativeAdreno](https://github.com/UniXNU/NativeAdreno)、
 [UniXNU/NativeMetal](https://github.com/UniXNU/NativeMetal)、Mesa
 freedreno / Turnip、[UniXNU](https://github.com/UniXNU) 组织下的配套模块。
@@ -204,6 +206,7 @@ Adreno 640  ──(scanout)──►  面板 framebuffer
 | R6 | **用户态 Metal 不认插件设备** | 低（`MTLAddDevice` 已确认存在 ✓） | 高 | 先用 NativeMetal 的最小例子验证注册；不行就只做 Vulkan/自定义合成 |
 | R7 | **着色器运行时编译太慢**（iOS 的 UI 预编译包是 AGX 的） | 高 | 中（体验） | 预编译常用 UI 包；接受首次卡顿；或只对特定 App 开 GPU |
 | R8 | 工作量大、长期无收益 | 高 | 中 | 分阶段，每阶段有独立验收；阶段 0 失败就停 |
+| R9 | **GX/GMU 上电缺少 AOP QMP/ARC 契约**：vendor `gdsc-regulator.c` 在清 CX `SW_COLLAPSE` 前发送 `{class: clock, res: gpu_noc_wa}`；GX 还依赖 `gfx.lvl` ARC 电压 | 中 | 高 | CX 已验证无需 QMP；GX/GMU 前先补 ARC 表检查，若 GX power-up 超时或总线异常再补 AOP mailbox |
 
 ---
 
@@ -216,15 +219,22 @@ Adreno 640  ──(scanout)──►  面板 framebuffer
 步骤：
 1. GPUCC 时钟 + GDSC + RPMh 电压；
 2. SCM 加载/认证 zap；
-3. 读 GPU `chipid` 确认 `0x6040001`；
+3. 从 DT/efuse 确认 GPU `chipid` 为 `0x6040001`（不是 GPU 寄存器）；
 4. 加载 `a640_gmu.bin`，启动 GMU，跑通 HFI 握手；
 5. 加载 `a630_sqe.fw`，初始化 CP ring；
 6. 提交一个 PM4 `EVENT_WRITE`/`CLEAR` 类命令写到 `0x9c000000`；
 7. 屏幕上出现图案即成功。
 
+**当前进度（2026-10-21，真机验证）**：patch 0085 完成了步骤 1 的前半段——
+GCC GPU 时钟、CX GDSC 上电、GPU RBBM 读回（`sweetgpu=2`）。实测
+`cx after ... hw=0x80001fe0`，BIT(31) 置位，且系统继续启动到 SpringBoard；
+RBBM/CP 读回全 0 是因为 GX 仍关闭，不是寄存器总线故障。GX/GMU、zap、
+SMMU、CP 均未开始。CX 上电在本机没有发送 AOP `gpu_noc_wa` QMP 也成功了，
+但 GX/GMU 阶段的 ARC 电压表和 QMP 仍需验证（见 R9）。
+
 **验收**：面板出现非 ABL splash 的纯色块；GPU 中断计数增加；再次启动不破坏现有 GUI。
 **工期**：1~3 周（有参考代码、无硬件故障的前提下）。
-**风险**：R1、R2、R4。
+**风险**：R1、R2、R4、R9。
 
 ### 阶段 1：用户客户端与 BO
 
@@ -257,9 +267,9 @@ Adreno 640  ──(scanout)──►  面板 framebuffer
 | # | 检查 | 方法 | 结果 |
 | --- | --- | --- | --- |
 | P1 | iOS 16.7.16 是否支持 `MTLAddDevice` | `ipsw dyld symaddr` / `str` 查 dyld 缓存 | ✅ **存在**（`_MTLAddDevice` @ `0x181a1b368`，Metal） |
-| P2 | GPU 是否被 ABL 断电 | 加一个内核探针读 `0x6900000`/GPUCC 状态 | 待做（几小时） |
-| P3 | vendor 分区固件可取 | 从官方 ROM 解包 `a640_gmu.bin`/`a630_sqe.fw`/`a640_zap.mbn` | 待做 |
-| P4 | GPU SID / iommus | 从实时 DTB 读 `kgsl-3d0` 的 `iommus`（解析器已就绪） | 待做（几分钟） |
+| P2 | GPU 是否被 ABL 断电 | 加一个内核探针读 `0x6900000`/GPUCC 状态 | ✅ 0084：GPUCC 可读；CX/GX GDSC 均为 off（`0x222001`，`cx_hw=0x5ff4`） |
+| P3 | vendor 分区固件可取 | 从官方 ROM 解包 `a640_gmu.bin`/`a630_sqe.fw`/`a640_zap.mbn` | ✅ `research/firmware/sm8150/`（本地，gitignored） |
+| P4 | GPU SID / iommus | 从实时 DTB 读 `kgsl-3d0` 的 `iommus`（解析器已就绪） | ✅ 实时 DT：SID 0/2，GMU SID 4/5；独立 GPU SMMU `0x2ca0000` |
 
 ---
 

@@ -290,16 +290,21 @@ More in [`NOTES.md`](NOTES.md) and [`GUACAMOLE.md`](GUACAMOLE.md).
 
 1. **Stability and usability** of the current image: auto-lock/wake, frame rate,
    crash-free long runs.
-2. **GPU (Adreno 640).** The stack exists in [UniXNU](https://github.com/UniXNU):
-   [NativeAdreno](https://github.com/UniXNU/NativeAdreno) (XNU kernel driver:
-   GMU, CP ring, BOs, SMMUv2, fences) and
-   [NativeMetal](https://github.com/UniXNU/NativeMetal) (Metal frontend,
-   `MTLAddDevice`, AIR translation), with freedreno/Turnip and AirNir as the
-   shader/compiler references. They run on an Adreno 740 (SM8550); the a640 port
-   is a matter of the a640 power-up tables, GMU HFI version, GPUCC clocks,
-   SMMU SIDs and the zap path, all of which are implemented in Mesa's `a6xx`
-   driver. First milestone: GPU power-up + GMU + one PM4 submit that clears the
-   panel.
+2. **GPU (Adreno 640).** No existing driver drops into this kernel: Turnip,
+   Freedreno and KGSL assume Linux `/dev/kgsl-3d0` or DRM, and the macOS
+   `IOAcceleratorFamily2`/AGX kexts are not present in the iOS 16 userland.
+   [UniXNU NativeAdreno](https://github.com/UniXNU/NativeAdreno) supplies a
+   reusable XNU skeleton (GMU, CP ring, BOs, SMMUv2, fences), but the a640
+   power-up tables, GMU HFI version, GPUCC clocks, SMMU SIDs and zap path must be
+   written against Mesa's `a6xx` reference. Order: (1) kernel power-up + GMU +
+   SQE + one CP queue; acceptance is the CP writing a known value into a mapped
+   buffer and the CPU reading it back; (2) userspace buffers/queues/fences and a
+   Mesa/Turnip port; (3) an iOS `_MTLDevice` plugin using the `MetalPluginName`
+   loading path, with AIR to SPIR-V via metal2vulkan and Turnip's
+   SPIR-V→NIR→IR3. Patch 0085 is the first kernel step: it powers the CX GDSC
+   and reads the RBBM registers under `sweetgpu=2`; GX, GMU, SMMU and the CP
+   ring are still missing. GLES is not an independent shortcut:
+   `AppleMetalGLRenderer` is a Metal client.
 3. **Radios and audio** (Wi-Fi, Bluetooth, UART, speakers) are separate bring-up
    projects of similar size.
 

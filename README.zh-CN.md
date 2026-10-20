@@ -268,14 +268,18 @@ fastboot boot /tmp/opencode/img-t26.img     # 同一个 payload + sweetlogdump=1
 ## 路线图
 
 1. **当前镜像的稳定性与可用性**：自动锁屏/唤醒、帧率、长时间运行不崩溃。
-2. **GPU（Adreno 640）。** [UniXNU](https://github.com/UniXNU) 已经有整套栈：
-   [NativeAdreno](https://github.com/UniXNU/NativeAdreno)（XNU 内核驱动：GMU、
-   CP ring、BO、SMMUv2、fence）与
-   [NativeMetal](https://github.com/UniXNU/NativeMetal)（Metal 前端、`MTLAddDevice`、
-   AIR 翻译），着色器/编译器参考 freedreno/Turnip 与 AirNir。它们跑在 Adreno 740
-   （SM8550）上；移植到 a640 主要是上电寄存器表、GMU HFI 版本、GPUCC 时钟、
-   SMMU SID 与 zap 路径，这些在 Mesa 的 `a6xx` 驱动里都有完整实现。
-   第一个里程碑：GPU 上电 + GMU + 一次 PM4 提交把面板刷成纯色。
+2. **GPU（Adreno 640）。** 没有现成驱动能直接搬进这个内核：Turnip、Freedreno
+   与 KGSL 都假设 Linux 的 `/dev/kgsl-3d0` 或 DRM；macOS 的
+   `IOAcceleratorFamily2`/AGX kext 也不在 iOS 16 用户态里。
+   [UniXNU NativeAdreno](https://github.com/UniXNU/NativeAdreno) 提供了可复用的
+   XNU 骨架（GMU、CP ring、BO、SMMUv2、fence），但 a640 的上电表、GMU HFI 版本、
+   GPUCC 时钟、SMMU SID 与 zap 路径必须照 Mesa `a6xx` 重写。顺序是：
+   (1) 内核上电 + GMU + SQE + 一个 CP 队列，验收标准是 CP 把已知值写进映射过的
+   buffer、CPU 能读回；(2) 用户态 buffer/queue/fence 与 Mesa/Turnip 移植；
+   (3) iOS `_MTLDevice` 插件，走 `MetalPluginName` 加载路径，AIR 经 metal2vulkan
+   转 SPIR-V，再走 Turnip 的 SPIR-V→NIR→IR3。patch 0085 只是内核第一步：
+   `sweetgpu=2` 给 CX GDSC 上电并读 RBBM；GX、GMU、SMMU 与 CP ring 都还没有。
+   GLES 也不是独立捷径：`AppleMetalGLRenderer` 本身是 Metal 客户端。
 3. **无线与音频**（Wi-Fi、蓝牙、UART、扬声器）是体量相近的独立 bring-up 项目。
 
 ## 第二块板：Redmi Note 10 Pro（sweet）

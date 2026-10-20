@@ -451,6 +451,9 @@ on_node(struct walk *w, const char *name)
 static void
 probe_tlmm(void)
 {
+#ifdef HOST_TEST
+	return;		/* the host renderer has no /dev/mem */
+#else
 	volatile uint32_t *t = (volatile uint32_t *)(uintptr_t)BOARD_TLMM_PA;
 	/* SM8150 has four tile arrays inside the region; see sweet_touch_sec.c. */
 #define TLMM_TILE(pin)	(((pin) <= 7 || (pin) == 38 || ((pin) >= 51 && (pin) <= 82) || \
@@ -489,6 +492,33 @@ probe_tlmm(void)
 #undef TLMM_CTL
 #undef TLMM_IO
 #undef TLMM_TILE
+#endif /* !HOST_TEST */
+}
+
+/*
+ * GPU clock-controller snapshot (read-only). The GPU may be powered down
+ * after the splash, so only GPUCC (CX domain) is touched here; the GPU's own
+ * register blocks are left alone until the kernel owns the power sequence.
+ */
+static void
+probe_gpucc(void)
+{
+#ifdef HOST_TEST
+	return;		/* the host renderer has no /dev/mem */
+#elif !defined(BOARD_GPUCC_PA)
+	(void)0;
+#else
+	volatile uint32_t *g = (volatile uint32_t *)(uintptr_t)BOARD_GPUCC_PA;
+
+	/* gx_gdsc polls gdscr+4 and tests BIT(16); cx_gdsc samples 0x1540 and
+	 * tests BIT(31) (drivers/clk/qcom/gdsc.c). */
+	con_hex2("GPU gx", "cfg=", g[0x1010 / 4], "bcr=", g[0x1008 / 4]);
+	con_hex2("GPU cx", "hw=", g[0x1540 / 4], "bcr=", g[0x1068 / 4]);
+	con_hex2("GPU gmu", "bcr=", g[0x111c / 4], "rcg=", g[0x1120 / 4]);
+	con_hex2("GPU cbc0", "1004=", g[0x1004 / 4], "1064=", g[0x1064 / 4]);
+	con_hex2("GPU cbc1", "1078=", g[0x1078 / 4], "1088=", g[0x1088 / 4]);
+	con_hex2("GPU cbc2", "108c=", g[0x108c / 4], "1098=", g[0x1098 / 4]);
+#endif
 }
 
 void
@@ -593,6 +623,7 @@ probe_report(uintptr_t dtb)
 	p = ph(p, fb_distinct, 2);
 	*p = 0;
 	con_str("FB", buf);
+	probe_gpucc();
 
 	if (!room()) {
 		con_str("PROBE", "truncated (no rows left)");

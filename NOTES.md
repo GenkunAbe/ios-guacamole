@@ -57,6 +57,20 @@
   **Verified on the phone 2026-10-20 (img-t28): both keys register (`key=1` / `key=2`) and drive
   the iOS volume HUD, and the ABL's input/pull-up configuration survived `fastboot boot` as
   expected (`input=1` for both pins).
+- **GPU pre-flight (2026-10-20 late), and a hard lesson.** The live DT gives the real GPU topology:
+  `/soc/qcom,kgsl-3d0@2C00000` (`qcom,chipid = 0x6040001`, windows `0x2c00000`+0x40000,
+  `0x2c61000`+0x800, `0x6900000`+0x44000, `0x780000`+0x6fff, IRQ SPI 300), GPUCC
+  `qcom,gpucc-sm8150` at `0x2c90000`, and a **dedicated GPU SMMU** at `0x2ca0000`
+  (`qcom,qsmmuv500`, TBUs at `0x2cc5000`/`0x2cc9000`, `qcom,kgsl-smmu-v2` contexts with
+  **SID 0 = gfx3d_user, SID 2 = gfx3d_secure**) - not the apps SMMU at 0x15000000. Firmware
+  extracted to `research/firmware/sm8150/` (`a640_gmu.bin`, `a630_sqe.fw`, `a640_zap.mbn`,
+  the last one ELF32 QUALCOMM DSP6; linux-firmware mirror).
+  **Do not read GPUCC from the shim.** The ABL leaves the GPU's AHB clock gated; a read of
+  `0x2c90000` in the shim wedged the interconnect and the watchdog dropped the phone into EDL
+  (USB `05c6:900e`, recovered with power+volup+voldown). This is the same class of trap as the
+  UFS register probe on this board. Any GPUCC/GPU access must first enable GCC
+  `gpu_cfg_ahb_clk`, the GPUCC AHB clock and vote the CX/GX rails (RPMh) - i.e. the power-up
+  sequence and the first register reads are one step, never a blind read.
 - Payloads rebuilt with the corrected ADT + `/product`: `/tmp/opencode/img-t26.img` (console +
   `sweetlogdump=1`) and `img-t27.img` (noconsole, `sweetfb_hz=30`). Booting t26 on the Setup image
   reached the **real Setup wizard**: Hello -> language -> region -> "App & Data" with all five

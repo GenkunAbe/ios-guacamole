@@ -45,3 +45,10 @@
 
 /* TLMM (pinctrl) base: pin stride 0x1000, ctl at +0, io at +4. */
 #define BOARD_TLMM_PA		0x03000000UL
+
+/* GPUCC (qcom,gpucc-sm8150 @ 0x2c90000). Register offsets from mainline
+ * gpucc-sm8150.c: GX GDSCR 0x100c, CX GDSCR 0x106c, GX/CX/GMU BCRs
+ * 0x1008/0x1068/0x111c, RCG cmd 0x1120. The GPU itself is
+ * qcom,kgsl-3d0@2C00000 (kgsl/gfx register windows 0x2c00000 and 0x6900000)
+ * with its own SMMU at 0x2ca0000 (SIDs 0 user / 2 secure). */
+#define BOARD_GPUCC_PA		0x02c90000UL

@@ -41,5 +41,5 @@ mkbootimg --header_version 2 --kernel out/Image --ramdisk out/ramdisk.bin \
 	--cmdline "console=null" -o out/shim-boot.img
 # Host render of the console layout; with a DTB argument it renders the
 # live-FDT bring-up report instead (out/probe.ppm).
-gcc -O1 -Wall -DBOARD_HEADER=\"boards/$BOARD.h\" -o out/host_test console.c probe.c host_test.c && ./out/host_test
+gcc -O1 -Wall -DHOST_TEST=1 -DBOARD_HEADER=\"boards/$BOARD.h\" -o out/host_test console.c probe.c host_test.c && ./out/host_test
 ls -l out/Image out/shim-boot.img

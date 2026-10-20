@@ -1,6 +1,77 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## Agent handoff / active work (2026-10-20, latest)
+## Agent handoff / active work (2026-10-21, latest)
+
+### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
+- **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**
+  Observed today on GM1910:
+  - The 2020 TWRP 3.3.2B image (`recovery-TWRP-...img`, 96 MiB) is rejected by ABL with
+    `Failed to load/authenticate boot image: Load Error`.
+  - `TWRP+CN+EN.img` (guacamole, 96 MiB, AVB footer `AVBf` at byte 100663232) is accepted
+    by `fastboot boot` and starts TWRP (adb states `sideload`, then `recovery` after the
+    sideload session ends). TWRP's main-menu adbd is expected to be root; the `recovery`
+    state was seen but shell was not exercised before it rebooted.
+  - `fastboot flash boot_a TWRP+CN+EN.img` reports OKAY but the next boot stays in fastboot:
+    the flashed recovery image is not booted from the boot partition (AVB/vbmeta mismatch).
+    `backup/boot_b.img` was flashed back to boot_a and fastboot is healthy again. Do not flash
+    recovery images to boot_a; keep using `fastboot boot`.
+  - A rebuilt TWRP image (mkbootimg v2, same kernel/dtb/recovery_dtbo, ramdisk with
+    `ro.adb.secure=0` + host `/adb_keys`, 89.8 MiB, no AVB footer) is rejected by
+    `fastboot boot` with the same Load Error. The accepted 96 MiB image is the signed one;
+    unsigned large images do not pass ABL authentication. The 29 MiB shim images are fine.
+- **Offline source cross-check** (`OnePlusOSS/android_kernel_oneplus_sm8150`, branch
+  `oneplus/SM8150_P_9.0`, sparse clone under `/tmp/oneplusoss-kernel`):
+  - `sm8150-gpu.dtsi`: GPU `qcom,kgsl-3d0@2C00000` (`chipid 0x06040000`, IRQ 300),
+    GMU `0x2c6a000 + 0x30000` with PDC at `0xb280000` / `0xb480000` (IRQ 304/305),
+    dedicated SMMU `0x2ca0000` with SIDs 0 (gfx3d_user), 2 (gfx3d_secure),
+    4 (gmu_user), 5 (gmu_kernel); zap is `a640_zap`, PAS id 13.
+  - GDSC: CX `0x2c9106c` + HW ctrl `0x2c91540` BIT(31); GX `0x2c9100c` + domain
+    `0x2c91508` + SW reset `0x2c91008`. GPUCC BCRs: GX `0x1008`, CX `0x1068`, GMU `0x111c`,
+    RCG `0x1120`; `gpu_cc_ahb_clk` enable is `0x1078` BIT(0) (CLK_IS_CRITICAL).
+  - GCC GPU branches: cfg AHB `0x71004` (critical), memnoc `0x7100c` (voted),
+    snoc_dvm `0x71018`, **ddrss_gpu_axi `0x71154` (voted, used by both the GPU and the
+    GPU SMMU)**. Patch 0084 currently enables the first three; add `0x71154` before the
+    first GPUCC read in a follow-up patch.
+- **TWRP log pull works and the iOS root is intact (2026-10-21 00:42).**
+  `tools/sweet-log-pull.sh /tmp/sweetlog-before.txt` from the TWRP main-menu adb
+  (`adb` state `recovery`, uid 0) read `/dev/block/sda19` (243,561,607,168 bytes).
+  Ring header: version 1, 4 MiB, 320,834 bytes written, flush #218. The decoded
+  log is the last iOS boot: 8/8 CPUs, `SWEET UFS: "userdata" ... 232278 MiB,
+  read-write`, `AppleCLCD 1440x3120 ... presented as 1125x2436`, 1401 `exec`
+  lines, SpringBoard/backboardd, personas 99/100/199/200/1000, display on/off,
+  touch `id=ac3761 events=96`, keys 1/0. No `SWEET GPU` lines (the boot predates
+  the 0084 probe).
+  HFSX volume header at userdata+1024: signature `0x4858`, version 5, block 4096,
+  4,194,304 blocks (16 GiB), free 996,504, files 186,411, folders 139,830.
+- **GPUCC probe boot did not wedge the bus (2026-10-21 00:44-00:49).**
+  `/tmp/opencode/img-t30.img` (`sweetgpu=1 sweetlogdump=1`) loaded via
+  `fastboot boot` (OKAY). A 4-minute USB monitor saw no transition at all:
+  no EDL `05c6:900e`, no Android `22d9:2769`, no fastboot `18d1:d00d`. So the
+  GCC-gated GPUCC reads in patch 0084 are survivable; the phone is expected to
+  be in the iOS userland. The `SWEET GPU:` register lines are in the persistent
+  ring, but reading them needs another TWRP session (main-menu adb, uid 0).
+  Next: boot TWRP, run `tools/sweet-log-pull.sh`, inspect `SWEET GPU`.
+  `/tmp/opencode/img-t31.img` is the normal GUI control boot. Stock boot_a is
+  restored; userdata untouched.
+- **0084 GPUCC probe result (img-t30, TWRP pull 2026-10-21 00:50).**
+  `logs/gpu-0084-2026-10-21.txt` (local, gitignored):
+  ```
+  SWEET GPU: gcc_gpu_cfg_ahb_clk 0x1 -> 0x1
+  SWEET GPU: gcc_gpu_memnoc_gfx_clk 0x80000221 -> 0x80000221 (still halted)
+  SWEET GPU: gcc_gpu_snoc_dvm_gfx_clk 0x80000001 -> 0x80000001 (still halted)
+  SWEET GPU: gpucc gx_cfg=0x88400 cx_hw=0x5ff4
+  SWEET GPU: gpucc bcr gx=0 cx=0 gmu=0 rcg=0x80000000
+  SWEET GPU: gpucc gdscr gx=0x222001 cx=0x222001
+  ```
+  Decode with the official `drivers/clk/qcom/gdsc.c`: `PWR_ON_MASK=BIT(31)`,
+  `SW_COLLAPSE_MASK=BIT(0)`, so `0x222001` = SW collapse (off) + retain-periph
+  (BIT(13)) + the default wait fields (BIT(21), BIT(13)). Both CX and GX GDSCs
+  are **off**; `cx_hw=0x5ff4` (BIT(31)=0) agrees. The two GCC branches are
+  `BRANCH_VOTED`; their bit0 was already 1, so the writes change nothing and the
+  CLK_OFF status is the missing interconnect/RPMh vote, not a branch disable.
+  The GPUCC block is readable without wedging the bus. Next step is the RPMh
+  CX/GX rail vote plus GDSC power-up (and `GCC_DDRSS_GPU_AXI_CLK` `0x71154`),
+  not more clock pokes.
 
 ### 2026-10-20 (later): Setup-intact root image, ADT --dump trap, display geometry
 - **Setup image built and flashed.** `iosroot-build/build-root-setup.sh` copies the iOS 16.7.16

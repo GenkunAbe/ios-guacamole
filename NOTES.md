@@ -60,7 +60,8 @@
   whether the mobile session exists in this image (apps launching implies it does).
 
 ### 2026-10-19 (late): XNU BOOTS ON THE GM1910
-- CI via the fork **wochgn/ios-sweet** (the account has no push rights to dipa-studio;
+- CI via the fork **wochgn/ios-guacamole** (renamed from `wochgn/ios-sweet` on 2026-10-20;
+  the account has no push rights to dipa-studio;
   `gh` device-flow login). Four GUACAMOLE builds to green, each fixing a real porting bug:
   header export (`pexpert/pexpert/arm64/Makefile` PRIVATE_KERNELFILES missed GUACAMOLE.h /
   sweet_dev.h), arch filter (`MakeInc.def` must keep GUACAMOLE on plain arm64, not arm64e),

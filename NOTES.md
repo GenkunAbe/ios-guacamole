@@ -117,6 +117,26 @@
     `a640_gmu.bin`, program the GMU SMMU contexts and start the CM3. The
     `gfx.lvl` ARC vote and the AOP QMP remain unverified and become relevant
     before any GX power state is left enabled.
+- **GX GDSC alone cannot power the GPU core (patch 0086, 2026-10-21 01:28).**
+  `xnu/patches/0086-sweet-guacamole-gpu-gx-probe.patch` adds `sweetgpu=3`:
+  vendor GX SW-reset (0x1008), AON GMEM reset (0x1508 BIT(4)), deassert clamp
+  (BIT(0)), clear `SW_COLLAPSE` (0x100c), poll 0x1010 BIT(16); it collapses GX
+  again after the read. Hardware log (img-gpu-0086):
+  ```
+  SWEET GPU: gx before gdscr=0x222001 cfg=0x88400
+  SWEET GPU: gx after gdscr=0x8222000 cfg=0x1080400 (power-up incomplete)
+  SWEET GPU: gpucc gx_cfg=0x1080400 cx_hw=0x80001fe0
+  SWEET GPU: gpucc gdscr gx=0x8222001 cx=0xf8222000
+  ```
+  PWR_UP never asserted; RBBM still read 0. The board booted to SpringBoard
+  and the collapse path ran, so the failure is bounded. This is consistent with
+  the missing `gfx.lvl` ARC/regulator vote, not with a bad GDSC write.
+- **Next: read the ARC tables without voting (patch 0087).**
+  `xnu/patches/0087-sweet-guacamole-gpu-arc-dump.patch` adds a read-only
+  command-DB parser for `gfx.lvl`, `cx.lvl`, `mx.lvl` (slave ARC 3, aux u16
+  level tables) and calls it from `sweetgpu=3` before the GX attempt. It does
+  not write RPMh. The next hardware boot records the real resource addresses
+  and level tables; only then can a dependent GX/MX vote be designed.
 
 ### 2026-10-20 (later): Setup-intact root image, ADT --dump trap, display geometry
 - **Setup image built and flashed.** `iosroot-build/build-root-setup.sh` copies the iOS 16.7.16

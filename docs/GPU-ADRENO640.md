@@ -228,9 +228,14 @@ Adreno 640  ──(scanout)──►  面板 framebuffer
 **当前进度（2026-10-21，真机验证）**：patch 0085 完成了步骤 1 的前半段——
 GCC GPU 时钟、CX GDSC 上电、GPU RBBM 读回（`sweetgpu=2`）。实测
 `cx after ... hw=0x80001fe0`，BIT(31) 置位，且系统继续启动到 SpringBoard；
-RBBM/CP 读回全 0 是因为 GX 仍关闭，不是寄存器总线故障。GX/GMU、zap、
+RBBM/CP 读回全 0 是因为 GX 仍关闭，不是寄存器总线故障。
+patch 0086 的 `sweetgpu=3` 尝试用 vendor GX SW-reset/AON reset/clamp 序列
+单独给 GX 上电：`cfg=0x1080400`，PWR_UP 始终不置位，说明缺 `gfx.lvl`
+ARC/regulator vote；失败路径把 GX 重新 collapse，系统仍启动到桌面。
+patch 0087 增加只读的 `gfx.lvl`/`cx.lvl`/`mx.lvl` command-DB 表 dump，
+用于下一步设计 dependent GX/MX vote（硬件结果待做）。GX/GMU、zap、
 SMMU、CP 均未开始。CX 上电在本机没有发送 AOP `gpu_noc_wa` QMP 也成功了，
-但 GX/GMU 阶段的 ARC 电压表和 QMP 仍需验证（见 R9）。
+但 GX/GMU 阶段的 QMP 仍需验证（见 R9）。
 
 **验收**：面板出现非 ABL splash 的纯色块；GPU 中断计数增加；再次启动不破坏现有 GUI。
 **工期**：1~3 周（有参考代码、无硬件故障的前提下）。

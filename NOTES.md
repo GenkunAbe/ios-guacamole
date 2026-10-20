@@ -1,6 +1,35 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
-## Agent handoff / active work (2026-10-15, latest)
+## Agent handoff / active work (2026-10-20, latest)
+
+### 2026-10-20 (later): Setup-intact root image, ADT --dump trap, display geometry
+- **Setup image built and flashed.** `iosroot-build/build-root-setup.sh` copies the iOS 16.7.16
+  root (16 GiB raw HFSX, 12 GiB used) and `tools/sweet-root-tweaks.py --keep-setup` applies the
+  usual tweaks *without* the purplebuddy SetupDone prefs (launchd 7 × `_PanicOnCrash` renamed,
+  2 CommCenter jobs removed, `/private/var/containers` created, VirtualAudio off, MediaToolbox
+  recorder off, migration/springboard prefs). The fresh image has no mobileactivationd system
+  container, so the data-ark step is skipped (`warning: ... skipped data ark`) - activation still
+  depends on the ADT Hactivation flags. `fsck.hfsplus -f -y` once (Linux free-block-count quirk),
+  then `img2simg ... 4096` -> 12,145,291,576 B `.simg`, flashed to userdata in 412 s.
+  Note `--keep-setup` must come after the image path; the tweaks script is flag-aware now.
+- **`tools/mkadt.py FILE --dump` used to overwrite FILE.** The dump path rebuilt the tree with the
+  *default* device and wrote it before dumping, so dumping `shim/out/guacamole.adt` silently
+  replaced the guacamole profile with sweet's `sweet-fbcon` (1080x2400, stride 4320,
+  reg 0x1700000) - that stale ADT was then restored from a backup and used for the t19 boot.
+  Fixed: `--dump` on an existing file now parses/dumps it without rebuilding. Current
+  `shim/out/guacamole.adt`: 1440x3120, stride 5760, reg 0x2400000, no `/product`
+  (sha256 597ce111...).
+- **Display chain facts** (to kill the "display geometry" theory): `AppleCLCD` takes
+  base/width/height/stride from the boot args `Video` struct (shim `FB_BASE 0x9c000000`,
+  `FB_W 1440`, `FB_H 3120`, stride 5760), not from `sweet-fbcon`; that ADT node only feeds the
+  kprintf fbcon (`pe_serial.c fbcon_probe`). The letterbox math for a panel larger than the
+  1125x2436 canvas is correct: `fOffX = (1125 - 1440) / 2 = -157`, and `present()` does
+  `dx -= fOffX` (so +157) and clips, i.e. the canvas lands centered with 157/158 px side bars.
+  The black screen is therefore not stride or offset: the GUI never presents because the user
+  session is dead (usermanagerd falls back to loginwindow, SpringBoard SIGSEGV).
+- Payloads rebuilt with the corrected ADT: `/tmp/opencode/img-t24.img` (console + `sweetlogdump=1`)
+  and `img-t25.img` (noconsole, `sweetfb_hz=30`). Next: boot t24 on the flashed Setup image and
+  read the ring log for usermanagerd/SpringBoard/purplebuddy.
 
 ### 2026-10-19 (late): XNU BOOTS ON THE GM1910
 - CI via the fork **wochgn/ios-sweet** (the account has no push rights to dipa-studio;

@@ -236,6 +236,14 @@ if __name__ == '__main__':
                     help='override the kernel RAM size, e.g. 0x180000000 for an 8 GB guacamole')
     ap.add_argument('--dump', action='store_true')
     args = ap.parse_args()
+    if args.dump and os.path.exists(args.out):
+        # `mkadt FILE --dump` inspects FILE. Rebuilding first would silently
+        # rewrite it with the default device's profile (this once replaced a
+        # guacamole ADT with sweet's 1080x2400 sweet-fbcon values).
+        blob = open(args.out, 'rb').read()
+        adt.dump(adt.parse(blob)[0])
+        print(f'{args.out}: {len(blob)} bytes (existing file, not rebuilt)', file=sys.stderr)
+        sys.exit(0)
     root = build(qemu=args.qemu, highmem=args.highmem, device=args.device, dram_size=args.dram_size)
     blob = adt.serialize(root)
     open(args.out, 'wb').write(blob)

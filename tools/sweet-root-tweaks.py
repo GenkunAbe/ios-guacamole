@@ -122,10 +122,14 @@ def audio(root):
         print('StartRecorderServer off', os.path.relpath(conf, root))
 
 
+KEEP_SETUP = '--keep-setup' in sys.argv
+
+
 def main():
-    if len(sys.argv) != 2 or not os.path.isdir(os.path.join(sys.argv[1], 'System/Library/xpc')):
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if len(args) != 1 or not os.path.isdir(os.path.join(args[0], 'System/Library/xpc')):
         sys.exit(__doc__)
-    root = sys.argv[1]
+    root = args[0]
     launchd(root)
     containers(root)
     activation(root)
@@ -133,20 +137,24 @@ def main():
     merge_pref(root, 'com.apple.migration', {
         'LastSystemVersion': BUILD,
         'DMUserDataDisposition': {'SyntheticDidUpgrade': False, 'buildVersion': BUILD}})
-    merge_pref(root, 'com.apple.springboard', {
-        'BKNoWatchdogs': True,
-        'FBLaunchWatchdogExceptions': {'com.apple.purplebuddy': 100.0},
-        'MCForceShowCloudConfigurationUI': False})
-    merge_pref(root, 'com.apple.purplebuddy', {
-        'SetupDone': True, 'SetupFinishedAllSteps': True, 'SetupVersion': 11,
-        'daemonizeNeedsToRun': False})
-    merge_pref(root, 'com.apple.purplebuddy.notbackedup', {
-        k: False for k in ('ShouldRunDiagnosticsMiniBuddy', 'ShouldRunHSA2MiniBuddy',
-                           'ShouldRunKeychainSyncMiniBuddy', 'ShouldRunMesaMiniBuddy',
-                           'ShouldRunPaymentMiniBuddy', 'ShouldRunStandardMiniBuddy',
-                           'SilentICDPUpgrade')})
-    merge_pref(root, 'com.apple.managedconfiguration.notbackedup', {
-        'LockdownActivationIndicatesCloudConfigurationAvailable': False})
+    sb = {'BKNoWatchdogs': True,
+          'FBLaunchWatchdogExceptions': {'com.apple.purplebuddy': 100.0}}
+    if not KEEP_SETUP:
+        sb['MCForceShowCloudConfigurationUI'] = False
+    merge_pref(root, 'com.apple.springboard', sb)
+    if not KEEP_SETUP:
+        # Skipping Setup also skips the step that creates the mobile session;
+        # --keep-setup leaves these alone so the wizard can run once.
+        merge_pref(root, 'com.apple.purplebuddy', {
+            'SetupDone': True, 'SetupFinishedAllSteps': True, 'SetupVersion': 11,
+            'daemonizeNeedsToRun': False})
+        merge_pref(root, 'com.apple.purplebuddy.notbackedup', {
+            k: False for k in ('ShouldRunDiagnosticsMiniBuddy', 'ShouldRunHSA2MiniBuddy',
+                               'ShouldRunKeychainSyncMiniBuddy', 'ShouldRunMesaMiniBuddy',
+                               'ShouldRunPaymentMiniBuddy', 'ShouldRunStandardMiniBuddy',
+                               'SilentICDPUpgrade')})
+        merge_pref(root, 'com.apple.managedconfiguration.notbackedup', {
+            'LockdownActivationIndicatesCloudConfigurationAvailable': False})
 
 
 if __name__ == '__main__':

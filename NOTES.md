@@ -132,6 +132,30 @@
     reset path. Patches `0099`-`0102` are committed; image
     `/tmp/opencode/img-gpu-0102.img`.
 
+### 2026-10-21: UniXNU/UEFI boot option (assessment)
+- The known guacamole UEFI is the Renegade/edk2-msm OnePlus 7 Pro (SM8150) WoA port.
+  UniXNU's chain is: stock ABL -> BootShim -> UEFI firmware volume -> UniXNU
+  boot manager (`\EFI\UniXNU\unixnu.toml`) -> DarwinBoot -> XNU.
+- DarwinBoot is the standardized replacement for our shim: it reads
+  `kernel.macho`, `kernel.macho.adt` (Apple ADT sidecar) and optional trust
+  cache, builds `DARWIN_BOOT_ARGS`, exits boot services, disables the MMU and
+  jumps to XNU in EL1. The UEFI must provide GOP, simple-text input, simple
+  file system, block IO and (optionally) serial/ACPI.
+- Port cost for guacamole: a device repo `board.toml` (firmware config/DSC/FDF,
+  boot image parameters, payload/ADT tool, userdata windows), a prelinked
+  `kernel.macho`, and an ADT sidecar with `/chosen/memory-map` placeholders.
+  Our `tools/mkadt.py`/`shim/out/guacamole.adt` already generate the required
+  nodes; the missing pieces are the placeholders and the DarwinBoot/prelink
+  packaging. Our UFS/display/touch/keys drivers can stay.
+- The A640 GMU/RSCC/SMMU blocker is orthogonal: UEFI changes the loader and
+  platform init, not the GPU power sequence. NativeAdreno is a740; our a640
+  CB0/RSCC work is still required.
+- Decision: keep the shim as the working iOS/GPU path; evaluate the guacamole
+  UEFI in parallel with `fastboot boot` only (no partition writes). Then use
+  UniXNU's payload-only mode (DarwinBoot loads our kernel + ADT) before
+  considering a full device-repo/persistent migration. Do not replace the
+  working boot chain until the GMU blocker is fixed.
+
 ### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
 - **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**
   Observed today on GM1910:

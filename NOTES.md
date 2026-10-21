@@ -2,7 +2,7 @@
 
 ## Agent handoff / active work (2026-10-21, latest)
 
-### Session handoff (2026-10-21 19:12)
+### Session handoff (2026-10-21 21:10)
 - **0087 verified on hardware.** Booted `img-gpu-0087.img` (`sweetgpu=3`) at
   18:05; iOS reached SpringBoard (SpringBoard/AKS/touch lines), then
   Power+Volume-Down -> OrangeFox -> `tools/sweet-log-pull.sh
@@ -64,13 +64,39 @@
   translation exists yet. SpringBoard still boots.
 - **Device:** GM1910 `d3109478` is in OrangeFox recovery with root adb; only
   `fastboot boot` images were used, no partition was written.
-- **Next:** stage 0.4 GMU cold boot. Embed `a640_gmu.bin` as a payload RAMDisk
-  (`/chosen/memory-map`), load its ITCM blocks (addr < 0x4000) and DTCM
-  blocks (0x40000..0x44000) through the GMU register windows, clear
-  `CM3_FW_INIT_RESULT`, set `BOOT_CONFIG=2`, reset/poll for `0x100`, and
-  report `FW_INIT_RESULT` plus `GMU2HOST_INTR_INFO`; assert reset and restore
-  clocks afterwards. HFI and SMMU mappings for icache 0x4000, dcache 0x44000
-  and HFI 0x60001000 come after this; SIDs 4/5 currently fault.
+- **GMU cold-boot chain 0091-0097 (all bounded; iOS reached SpringBoard after
+  every boot):**
+  - **0091:** `a640_gmu.bin` embedded as a payload RAMDisk and read from
+    `/chosen/memory-map`; ITCM/DTCM blocks loaded through the GMU register
+    windows; CM3 reset; `FW_INIT_RESULT=0`. Log `logs/gpu-0091-2026-10-21.txt`.
+  - **0092:** minimal GPU-SMMU stage-1 (4K tables, 2MB blocks) mapping
+    IOVA 0..2MB and 0x60000000..; the first 2MB allocation was not 2MB
+    PA-aligned, fixed by allocating 4MB and using an aligned 2MB subrange.
+    icache/dcache blocks copied; CBAR/SCTLR/TTBR/TCR/S2CR read back correctly;
+    `FW_INIT_RESULT=0`. Log `logs/gpu-0092b-2026-10-21.txt`.
+  - **0093:** `GPU_CC_GMU_CLK_SRC` was **root-off** (`0x80000000`). Enabled
+    its GCC parent and set 200MHz (`cfg=0x602`, `cmd=0x80000000->0x2`);
+    `FW_INIT_RESULT=0`. Log `logs/gpu-0093-2026-10-21.txt`.
+  - **0094:** GMU cache/bus/power-collapse config and `PWR_COL_CP_MSG`;
+    `FW_INIT_RESULT=0`. Log `logs/gpu-0094-2026-10-21.txt`.
+  - **0095:** minimal 2-queue HFI table (`QTBL_ADDR=0x60001000`, `INFO=1`)
+    and `GMU_RPMH_CTRL=0xf11`; `FW_INIT_RESULT=0`.
+    Log `logs/gpu-0095-2026-10-21.txt`.
+  - **0096 diagnostics:** `ITCM[0]=0x43f80` (firmware initial SP, so the load
+    is correct), `SYSRESET 1->0`, `BOOT_CONFIG=2`, `GEN7=1`, `cx.lvl`
+    corner 2 on. Still `FW_INIT_RESULT=0`. Log `logs/gpu-0096-...`.
+  - **0097:** GMU BCR pulse (`0->0`, no effect) and both GPLL0 parent
+    branches (`0x1605d7f->0x161dd7f`); still `FW_INIT_RESULT=0`.
+    Log `logs/gpu-0097-2026-10-21.txt`.
+  - **Conclusion:** GDSC, ARC votes, SMMU, firmware ITCM/DTCM/BO copy, HFI
+    table, RPMh client, reset release and 200MHz RCG config are each
+    individually verified, but the CM3 never executes (`FW_INIT_RESULT` stays
+    0, no interrupts). Prime suspect: the 200MHz RCG source has no live input
+    because the GPLL0 PLL/even output is off, so the CM3 has no clock. Next:
+    test the XO source (`CFG=0`, root enable) or GPUCC PLL1 500MHz; if that
+    also fails, the remaining candidates are the RSCC/PDC uCode and the
+    GMU power-collapse state. Patches `0091`-`0097` are committed; images
+    under `/tmp/opencode/img-gpu-009*-*.img`.
 
 ### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
 - **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**

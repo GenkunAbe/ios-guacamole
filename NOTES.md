@@ -2,7 +2,7 @@
 
 ## Agent handoff / active work (2026-10-21, latest)
 
-### Session handoff (2026-10-21 21:10)
+### Session handoff (2026-10-21 21:33)
 - **0087 verified on hardware.** Booted `img-gpu-0087.img` (`sweetgpu=3`) at
   18:05; iOS reached SpringBoard (SpringBoard/AKS/touch lines), then
   Power+Volume-Down -> OrangeFox -> `tools/sweet-log-pull.sh
@@ -64,7 +64,7 @@
   translation exists yet. SpringBoard still boots.
 - **Device:** GM1910 `d3109478` is in OrangeFox recovery with root adb; only
   `fastboot boot` images were used, no partition was written.
-- **GMU cold-boot chain 0091-0097 (all bounded; iOS reached SpringBoard after
+- **GMU cold-boot chain 0091-0098 (all bounded; iOS reached SpringBoard after
   every boot):**
   - **0091:** `a640_gmu.bin` embedded as a payload RAMDisk and read from
     `/chosen/memory-map`; ITCM/DTCM blocks loaded through the GMU register
@@ -88,15 +88,21 @@
   - **0097:** GMU BCR pulse (`0->0`, no effect) and both GPLL0 parent
     branches (`0x1605d7f->0x161dd7f`); still `FW_INIT_RESULT=0`.
     Log `logs/gpu-0097-2026-10-21.txt`.
-  - **Conclusion:** GDSC, ARC votes, SMMU, firmware ITCM/DTCM/BO copy, HFI
-    table, RPMh client, reset release and 200MHz RCG config are each
-    individually verified, but the CM3 never executes (`FW_INIT_RESULT` stays
-    0, no interrupts). Prime suspect: the 200MHz RCG source has no live input
-    because the GPLL0 PLL/even output is off, so the CM3 has no clock. Next:
-    test the XO source (`CFG=0`, root enable) or GPUCC PLL1 500MHz; if that
-    also fails, the remaining candidates are the RSCC/PDC uCode and the
-    GMU power-collapse state. Patches `0091`-`0097` are committed; images
-    under `/tmp/opencode/img-gpu-009*-*.img`.
+  - **0098 (XO clock source):** RCG `cfg=0` (XO 19.2MHz), root enabled
+    (`cmd=0x80000000->0x2`), poll 5s; still `FW_INIT_RESULT=0`, no
+    interrupts. This **rules out the GPLL0/200MHz parent as the blocker**:
+    the CM3 has a live XO clock and still does not execute. Log
+    `logs/gpu-0098-2026-10-21.txt`.
+  - **Conclusion:** GDSC, ARC votes, SMMU, ITCM/DTCM/BO firmware copy (ITCM
+    vector `0x43f80`), HFI table, RPMh client, reset release (`SYSRESET 1->0`)
+    and both 200MHz/XO GMU clocks are individually verified, but the CM3
+    never executes. The remaining candidates are the **RSCC/PDC uCode +
+    GMU power-collapse/SPTP state** (the mainline `a6xx_gmu_rpmh_init` writes
+    the RSC sequencer and PDC uCode; we skipped it), or a GMU-internal
+    power/reset input not modeled yet. Next: map RSCC and both PDC windows,
+    reproduce `a6xx_gmu_rpmh_init`, and check SPTP/PDC status before the CM3
+    reset. Patches `0091`-`0098` are committed; images under
+    `/tmp/opencode/img-gpu-009*.img`.
 
 ### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
 - **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**

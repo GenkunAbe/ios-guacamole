@@ -2,7 +2,7 @@
 
 ## Agent handoff / active work (2026-10-21, latest)
 
-### Session handoff (2026-10-21 18:37)
+### Session handoff (2026-10-21 19:12)
 - **0087 verified on hardware.** Booted `img-gpu-0087.img` (`sweetgpu=3`) at
   18:05; iOS reached SpringBoard (SpringBoard/AKS/touch lines), then
   Power+Volume-Down -> OrangeFox -> `tools/sweet-log-pull.sh
@@ -38,12 +38,39 @@
   GX is collapsed and the rail voted off afterwards; iOS still reaches
   SpringBoard and display/backboardd work. RBBM/CP read 0 because the GPU
   core/GMU clocks are still off, not because GX is unpowered.
+- **0089 verified (2026-10-21 18:48).** Patch `3d492f1`, CI `39586065583`,
+  image `img-gpu-0089.img` (`sweetgpu=5`); log `logs/gpu-0089-2026-10-21.txt`.
+  With GX powered, the probe enables the GMU clocks and reads the block:
+  ```
+  gmu clocks before cx=0x80004220 gx=0x80000000 bcr=0 rcg=0x80000000
+  gpu_cc_cx_gmu_clk 0x80004220 -> 0x4221
+  gpu_cc_gx_gmu_clk 0x80000000 -> 0x1
+  gmu dtcm-last=0xe7faf6c2 fw-init=0 boot=0 reset=0x1
+  gmu intr=0 gmu2host=0 hfi=0 general7=0 fence=0
+  gmu clocks after cx=0x80004220 gx=0x80000000
+  ```
+  Both GMU clocks can be enabled and the GMU register block is readable. The
+  CM3 is halted with `SYSRESET=1`; no firmware is running. Clocks are
+  restored and iOS still reaches SpringBoard.
+- **0090 verified (19:02).** Patch `56630f4`, CI `39587451727`, image
+  `img-gpu-0090.img` (`sweetgpu=6`); log `logs/gpu-0090-2026-10-21.txt`:
+  ```
+  smmu id0=0x4c017e06 id1=0x20000005 id2=0x5555 scr0=0x2d0406 acr=0x1c gfsr=0
+  smmu pgshift=12 gr-page=8 cb=5 smr=6 clientpd=0
+  smmu sid0..sid6 s2cr type=2 (fault); sid7 s2cr cb=5 (>= NUMCB)
+  ```
+  The GPU SMMU is **active** (`clientpd=0`) with 4K pages, 8 GR pages and 5
+  context banks, but SIDs 4/5 (GMU) are not mapped. No GMU icache/dcache/HFI
+  translation exists yet. SpringBoard still boots.
 - **Device:** GM1910 `d3109478` is in OrangeFox recovery with root adb; only
   `fastboot boot` images were used, no partition was written.
-- **Next:** stage 0.3: after the `gfx.lvl` vote and GX power-up, enable the GX
-  GPU/GMU clock branches (and the `gpu_cc_gfx3d_clk_src` RCG) and re-read
-  RBBM; then load `a640_gmu.bin` and bring up the GMU SMMU/HFI. Keep 0088 as
-  the bounded power-up/teardown reference; never leave GX powered.
+- **Next:** stage 0.4 GMU cold boot. Embed `a640_gmu.bin` as a payload RAMDisk
+  (`/chosen/memory-map`), load its ITCM blocks (addr < 0x4000) and DTCM
+  blocks (0x40000..0x44000) through the GMU register windows, clear
+  `CM3_FW_INIT_RESULT`, set `BOOT_CONFIG=2`, reset/poll for `0x100`, and
+  report `FW_INIT_RESULT` plus `GMU2HOST_INTR_INFO`; assert reset and restore
+  clocks afterwards. HFI and SMMU mappings for icache 0x4000, dcache 0x44000
+  and HFI 0x60001000 come after this; SIDs 4/5 currently fault.
 
 ### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
 - **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**

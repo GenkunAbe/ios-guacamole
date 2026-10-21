@@ -2,7 +2,7 @@
 
 ## Agent handoff / active work (2026-10-21, latest)
 
-### Session handoff (2026-10-21 21:33)
+### Session handoff (2026-10-21 22:20)
 - **0087 verified on hardware.** Booted `img-gpu-0087.img` (`sweetgpu=3`) at
   18:05; iOS reached SpringBoard (SpringBoard/AKS/touch lines), then
   Power+Volume-Down -> OrangeFox -> `tools/sweet-log-pull.sh
@@ -64,7 +64,7 @@
   translation exists yet. SpringBoard still boots.
 - **Device:** GM1910 `d3109478` is in OrangeFox recovery with root adb; only
   `fastboot boot` images were used, no partition was written.
-- **GMU cold-boot chain 0091-0098 (all bounded; iOS reached SpringBoard after
+- **GMU cold-boot chain 0091-0102 (all bounded; iOS reached SpringBoard after
   every boot):**
   - **0091:** `a640_gmu.bin` embedded as a payload RAMDisk and read from
     `/chosen/memory-map`; ITCM/DTCM blocks loaded through the GMU register
@@ -93,16 +93,44 @@
     interrupts. This **rules out the GPLL0/200MHz parent as the blocker**:
     the CM3 has a live XO clock and still does not execute. Log
     `logs/gpu-0098-2026-10-21.txt`.
-  - **Conclusion:** GDSC, ARC votes, SMMU, ITCM/DTCM/BO firmware copy (ITCM
-    vector `0x43f80`), HFI table, RPMh client, reset release (`SYSRESET 1->0`)
-    and both 200MHz/XO GMU clocks are individually verified, but the CM3
-    never executes. The remaining candidates are the **RSCC/PDC uCode +
-    GMU power-collapse/SPTP state** (the mainline `a6xx_gmu_rpmh_init` writes
-    the RSC sequencer and PDC uCode; we skipped it), or a GMU-internal
-    power/reset input not modeled yet. Next: map RSCC and both PDC windows,
-    reproduce `a6xx_gmu_rpmh_init`, and check SPTP/PDC status before the CM3
-    reset. Patches `0091`-`0098` are committed; images under
-    `/tmp/opencode/img-gpu-009*.img`.
+  - **0099:** loaded the RSCC and both PDC sequencer uCodes with the a640
+    constants (PDC address `0x30090`, TCS3 second data `3`, the five RSC and
+    five PDC words), using RSCC `0x18220000`, PDC cfg `0xb290000` and PDC seq
+    `0xb490000`. Still `init=0`; no ACK handshake at this point.
+  - **0100:** vendor a640 `CM3_CFG=0x4052` (clear the NMI bit) and
+    `AHB_FENCE_RANGE_0=0x80a008a0`; still `init=0`.
+  - **0101:** added vendor `CX_GMU_WFI_CONFIG=0` before reset; superseded.
+  - **0102 (gated, log `logs/gpu-0102-2026-10-21.txt`):** prints the block
+    table, clears/reads SMMU faults and only resets with RSCC ACK. Result:
+    ```
+    fw head=0/0x30/0xefbeadde/0xefbeadde
+    0x0+0x30 ITCM; 0x200+0x140 ITCM; 0x400+0x38bc ITCM
+    0x4000+0x3a58 DDR; 0x40000+0x1b20 DTCM; 0x43fe0+0x14 DTCM
+    0x57000+0x308 DDR
+    smmu faults start gfsr=0 cb0=0x400
+    rscc no ack=0
+    GMU boot gated layout=0 rscc=0; not resetting CM3
+    ```
+    The CM3 was **not reset**; iOS still reached SpringBoard. The block table
+    proves `ITCM[0]=0x43f80` is the first block's data0 (initial SP), not a
+    block header.
+  - **CB0 FSR `0x400`** is outside `ARM_SMMU_FSR_FAULT`
+    (TF/AFF/PF/EF/UUT/TLBMCF/TLBLKF/ASF), so it is likely a reserved/RO bit,
+    not a real fault. The gate must use the fault mask and read
+    `CB_FAR`/`FSYNR0`/`FSYNR1` before deciding.
+  - **RSCC no ACK is the real blocker:** the RSC/GPU DRV does not answer
+    `RSCC_CONTROL_REQ=BIT(1)`. Need the correct GPU RSCC base/DRV and the
+    RSC TCS0..3/DRV status; do not release CM3 until ACK=1 and
+    `SEQ_BUSY_DRV0==0`.
+  - **User constraints (2026-10-21):** A640 firmware is block-based, not the
+    legacy whole-file ITCM load. ITCM 0..16 KiB, DTCM 0x40000..16 KiB,
+    icache 0x4000 (256K-16K), dcache 0x44000 (256K-16K). Do not change GMU
+    frequency (0098 ruled it out); do not touch SPTP; RSCC/PDC must use the
+    a640 constants; gate on real SMMU faults and the RSCC ACK.
+  - **Next:** mask CB0 FSR with `ARM_SMMU_FSR_FAULT`, log FAR/FSYNR; read
+    RSC TCS0..3/DRV status and locate the GPU RSCC; only then re-enable the
+    reset path. Patches `0099`-`0102` are committed; image
+    `/tmp/opencode/img-gpu-0102.img`.
 
 ### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
 - **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**

@@ -301,9 +301,11 @@ More in [`NOTES.md`](NOTES.md) and [`GUACAMOLE.md`](GUACAMOLE.md).
    buffer and the CPU reading it back; (2) userspace buffers/queues/fences and a
    Mesa/Turnip port; (3) an iOS `_MTLDevice` plugin using the `MetalPluginName`
    loading path, with AIR to SPIR-V via metal2vulkan and Turnip's
-   SPIR-V→NIR→IR3. Patch 0085 is the first kernel step: it powers the CX GDSC
-   and reads the RBBM registers under `sweetgpu=2`; GX, GMU, SMMU and the CP
-   ring are still missing. GLES is not an independent shortcut:
+   SPIR-V→NIR→IR3. Patches 0085-0088 are the first kernel steps: `sweetgpu=2`
+   powers the CX GDSC, and `sweetgpu=4` votes `gfx.lvl` corner 1 before
+   powering the GX GDSC (`PWR_UP` verified on hardware). RBBM still reads zero
+   because the GPU/GMU clocks are off; GMU, SMMU and the CP ring are still
+   missing. GLES is not an independent shortcut:
    `AppleMetalGLRenderer` is a Metal client.
 3. **Radios and audio** (Wi-Fi, Bluetooth, UART, speakers) are separate bring-up
    projects of similar size.

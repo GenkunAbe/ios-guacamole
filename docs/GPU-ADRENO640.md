@@ -2,9 +2,10 @@
 
 **日期**：2026-10-20（2026-10-21 更新）
 **对象**：一加 7 Pro（`guacamole`，SM8150 / 骁龙 855，Adreno 640）上的 ios-guacamole 移植
-**状态**：阶段 0.2 已在真机验证（XNU patch 0085：CX GDSC 上电成功，
-`hw` BIT(31)=1；RBBM 因 GX 仍关闭而读回 0）。当前系统仍完全依赖
-CoreAnimation 软件渲染，没有 GPU 驱动。
+**状态**：阶段 0.3 已在真机验证（XNU patch 0088：`gfx.lvl` ARC corner 1
+投票后 GX GDSC `gdscr` BIT(31)=1、`cfg` BIT(16)=1；RBBM/CP 仍读回 0，
+因为 GPU 核心/GMU 时钟未开）。当前系统仍完全依赖 CoreAnimation 软件渲染，
+没有 GPU 驱动。
 **参考**：[UniXNU/NativeAdreno](https://github.com/UniXNU/NativeAdreno)、
 [UniXNU/NativeMetal](https://github.com/UniXNU/NativeMetal)、Mesa
 freedreno / Turnip、[UniXNU](https://github.com/UniXNU) 组织下的配套模块。
@@ -232,10 +233,17 @@ RBBM/CP 读回全 0 是因为 GX 仍关闭，不是寄存器总线故障。
 patch 0086 的 `sweetgpu=3` 尝试用 vendor GX SW-reset/AON reset/clamp 序列
 单独给 GX 上电：`cfg=0x1080400`，PWR_UP 始终不置位，说明缺 `gfx.lvl`
 ARC/regulator vote；失败路径把 GX 重新 collapse，系统仍启动到桌面。
-patch 0087 增加只读的 `gfx.lvl`/`cx.lvl`/`mx.lvl` command-DB 表 dump，
-用于下一步设计 dependent GX/MX vote（硬件结果待做）。GX/GMU、zap、
-SMMU、CP 均未开始。CX 上电在本机没有发送 AOP `gpu_noc_wa` QMP 也成功了，
-但 GX/GMU 阶段的 QMP 仍需验证（见 R9）。
+patch 0087 读出 command-DB 三张表：`gfx.lvl` `0x30050`（0/16/48/64/128/
+192/224/256/320/384/416）、`cx.lvl` `0x30000`（0/16/64/128/192/256/384/416）、
+`mx.lvl` `0x30010`（0/16/128/192/256/320/384/416）。
+patch 0088 的 `sweetgpu=4` 在 GX 序列前向 `gfx.lvl` 写 RPMh corner 1；
+CPU 侧 ARC 投票数据是 **corner index**（`rpmhpd.c`: `cmd.data = corner`），
+不是 GMU HFI 的 `(level<<16)|(sindex<<8)|pindex`。实测
+`gx after gdscr=0xf8222000 cfg=0x70400`（PWR_ON/PWR_UP 均置位），随后
+collapse 并回投 corner 0；iOS 仍启动到 SpringBoard。GX 上电本身已解决；
+RBBM/CP 仍为 0，下一步是 GX GPU/GMU 时钟、`a640_gmu.bin`、zap、SMMU、CP。
+CX 上电在本机没有发送 AOP `gpu_noc_wa` QMP 也成功了，但 GX/GMU 阶段的
+QMP 仍需验证（见 R9）。
 
 **验收**：面板出现非 ABL splash 的纯色块；GPU 中断计数增加；再次启动不破坏现有 GUI。
 **工期**：1~3 周（有参考代码、无硬件故障的前提下）。

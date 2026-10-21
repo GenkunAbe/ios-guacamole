@@ -277,8 +277,10 @@ fastboot boot /tmp/opencode/img-t26.img     # 同一个 payload + sweetlogdump=1
    (1) 内核上电 + GMU + SQE + 一个 CP 队列，验收标准是 CP 把已知值写进映射过的
    buffer、CPU 能读回；(2) 用户态 buffer/queue/fence 与 Mesa/Turnip 移植；
    (3) iOS `_MTLDevice` 插件，走 `MetalPluginName` 加载路径，AIR 经 metal2vulkan
-   转 SPIR-V，再走 Turnip 的 SPIR-V→NIR→IR3。patch 0085 只是内核第一步：
-   `sweetgpu=2` 给 CX GDSC 上电并读 RBBM；GX、GMU、SMMU 与 CP ring 都还没有。
+   转 SPIR-V，再走 Turnip 的 SPIR-V→NIR→IR3。patch 0085-0088 是内核第一步：
+   `sweetgpu=2` 给 CX GDSC 上电，`sweetgpu=4` 先投 `gfx.lvl` corner 1 再给
+   GX GDSC 上电（`PWR_UP` 已真机验证）。RBBM 仍为 0 因为 GPU/GMU 时钟未开；
+   GMU、SMMU 与 CP ring 都还没有。
    GLES 也不是独立捷径：`AppleMetalGLRenderer` 本身是 Metal 客户端。
 3. **无线与音频**（Wi-Fi、蓝牙、UART、扬声器）是体量相近的独立 bring-up 项目。
 

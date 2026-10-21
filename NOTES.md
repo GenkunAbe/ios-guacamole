@@ -2,19 +2,48 @@
 
 ## Agent handoff / active work (2026-10-21, latest)
 
-### Session handoff (2026-10-21 end)
-- **Verified:** patch 0085 (CX GDSC power-up) on hardware; iOS still reaches
-  SpringBoard. **Negative:** patch 0086 (GX GDSC alone) never asserts PWR_UP.
-- **Built, not yet booted:** patch 0087 (read-only ARC table dump), CI run
-  `39467303644` green, artifact under `/tmp/opencode/art-0087`, boot image
-  `/tmp/opencode/img-gpu-0087.img` (`sweetgpu=3`).
+### Session handoff (2026-10-21 18:37)
+- **0087 verified on hardware.** Booted `img-gpu-0087.img` (`sweetgpu=3`) at
+  18:05; iOS reached SpringBoard (SpringBoard/AKS/touch lines), then
+  Power+Volume-Down -> OrangeFox -> `tools/sweet-log-pull.sh
+  logs/gpu-0087-2026-10-21.txt` (ring flush #19). ARC dump:
+  ```
+  SWEET RPMH: arc gfx.lvl addr=0x30050 levels=16: 0 16 48 64 128 192 224 256 320 384 416 0 0 0 0 0
+  SWEET RPMH: arc cx.lvl addr=0x30000 levels=16: 0 16 64 128 192 256 384 416 0 0 0 0 0 0 0 0
+  SWEET RPMH: arc mx.lvl addr=0x30010 levels=16: 0 16 128 192 256 320 384 416 0 0 0 0 0 0 0 0
+  ```
+  (11/8/8 valid entries; the rest is zero padding). The 0086 GX sequence still
+  failed and collapsed GX; the rest of the boot was unaffected.
+- **Vote semantics established:** CPU-side RPMh votes for `.lvl` ARC
+  resources use the **corner index** (`rpmhpd.c`: `cmd.data = corner`), not the
+  GMU HFI packed `(level<<16)|(sindex<<8)|pindex`. `gfx.lvl` enable corner is
+  1 (level 16); `mx.lvl` index 1 is also level 16. The packed form is only for
+  GMU HFI votes.
+- **0088 verified on hardware (2026-10-21 18:34).** Patch commit `27f2a05`,
+  CI run `39583450528` (GUACAMOLE, DEVELOPMENT) green. Image
+  `/tmp/opencode/img-gpu-0088.img` (SHA256 `b59d0441c9eb881e22897b4756363068c7f3c8c6b7ed2deab33068c42a060e3b`,
+  `sweetgpu=4`); log `logs/gpu-0088-2026-10-21.txt` (ring flush #9):
+  ```
+  SWEET GPU: stage=4
+  SWEET RPMH: gfx.lvl ARC corner 1 on ACTIVE vote complete
+  SWEET GPU: gx before gdscr=0x222001 cfg=0x88400
+  SWEET GPU: gx after gdscr=0xf8222000 cfg=0x70400
+  SWEET GPU: rbbm status=0 int=0 status3=0
+  SWEET GPU: cp always-on hi=0 lo=0 (no register response)
+  SWEET GPU: gx collapsed gdscr=0x222001 cfg=0x88400
+  SWEET RPMH: gfx.lvl ARC corner 0 off ACTIVE vote complete
+  ```
+  `gdscr` BIT(31)=1 and `cfg` BIT(16)=1: **the `gfx.lvl` vote is the missing
+  GX GDSC input**. Corner 1 (level 16) was enough; corners 2/3 were not tried.
+  GX is collapsed and the rail voted off afterwards; iOS still reaches
+  SpringBoard and display/backboardd work. RBBM/CP read 0 because the GPU
+  core/GMU clocks are still off, not because GX is unpowered.
 - **Device:** GM1910 `d3109478` is in OrangeFox recovery with root adb; only
   `fastboot boot` images were used, no partition was written.
-- **Next:** boot `img-gpu-0087.img`, wait for the iOS desktop, Power+Volume-Down
-  to fastboot, `fastboot boot /home/invalidname/下载/橙狐Rec_7Pro.img`, tap
-  sideload, then `tools/sweet-log-pull.sh logs/gpu-0087-2026-10-21.txt` and read
-  the `SWEET RPMH: arc gfx.lvl/cx.lvl/mx.lvl` lines. Do not vote any rail until
-  the dependent MX index is chosen from those tables.
+- **Next:** stage 0.3: after the `gfx.lvl` vote and GX power-up, enable the GX
+  GPU/GMU clock branches (and the `gpu_cc_gfx3d_clk_src` RCG) and re-read
+  RBBM; then load `a640_gmu.bin` and bring up the GMU SMMU/HFI. Keep 0088 as
+  the bounded power-up/teardown reference; never leave GX powered.
 
 ### 2026-10-21: TWRP/AVB constraints on guacamole, official SM8150 source cross-check
 - **`fastboot boot` is the only safe recovery path; flashing TWRP to boot_a does not work.**

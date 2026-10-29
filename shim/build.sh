@@ -9,8 +9,11 @@ DTB=${DTB:-../dtb/boot_unpacked/dtb}
 [ -f "boards/$BOARD.h" ] || { echo "unknown BOARD=$BOARD (shim/boards/)" >&2; exit 1; }
 [ -f "$DTB" ] || { echo "stock DTB not found: $DTB" >&2; exit 1; }
 echo "building shim for board $BOARD"
-CC=aarch64-linux-gnu-gcc
-OBJCOPY=aarch64-linux-gnu-objcopy
+CC=${CC:-aarch64-linux-gnu-gcc}
+OBJCOPY=${OBJCOPY:-aarch64-linux-gnu-objcopy}
+READELF=${READELF:-aarch64-linux-gnu-readelf}
+NM=${NM:-aarch64-linux-gnu-nm}
+HOSTCC=${HOSTCC:-gcc}
 CFLAGS="-O2 -ffreestanding -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -DBOARD_HEADER=\"boards/$BOARD.h\""
 mkdir -p out
 for f in start.S shim.c console.c mmu.c fdt.c loader.c probe.c ufs.c; do
@@ -18,13 +21,13 @@ for f in start.S shim.c console.c mmu.c fdt.c loader.c probe.c ufs.c; do
 done
 # The image runs wherever ABL puts it with no relocation pass: only the
 # header's image_size (start.o, linked at 0) may be an absolute address.
-abs=$(aarch64-linux-gnu-readelf -r out/shim.o out/console.o out/mmu.o out/fdt.o out/loader.o out/probe.o out/ufs.o | grep -c ABS64 || true)
+abs=$($READELF -r out/shim.o out/console.o out/mmu.o out/fdt.o out/loader.o out/probe.o out/ufs.o | grep -c ABS64 || true)
 [ "$abs" = 0 ] || { echo "error: $abs absolute relocations in C objects" >&2; exit 1; }
 $CC $CFLAGS -static -T shim.ld -Wl,--build-id=none -Wl,--no-warn-rwx-segments -Wl,-N \
 	out/start.o out/shim.o out/console.o out/mmu.o out/fdt.o out/loader.o out/probe.o out/ufs.o -o out/shim.elf
 $OBJCOPY -O binary out/shim.elf out/Image
 # ABL copies the file; pad to image_size so .bss/stacks exist as zeroed bytes.
-size=$(aarch64-linux-gnu-nm out/shim.elf | awk '$3=="_end"{print strtonum("0x"$1)}')
+size=$(printf '%d' 0x$($NM out/shim.elf | awk '$3=="_end"{print $1}'))
 truncate -s "$size" out/Image
 # Ramdisk: an xnu payload (tools/mkpayload.py) if given as $1, else an empty
 # newc cpio (ABL dislikes a zero-size ramdisk on some builds) -> diagnostics.
@@ -41,5 +44,5 @@ mkbootimg --header_version 2 --kernel out/Image --ramdisk out/ramdisk.bin \
 	--cmdline "console=null" -o out/shim-boot.img
 # Host render of the console layout; with a DTB argument it renders the
 # live-FDT bring-up report instead (out/probe.ppm).
-gcc -O1 -Wall -DHOST_TEST=1 -DBOARD_HEADER=\"boards/$BOARD.h\" -o out/host_test console.c probe.c host_test.c && ./out/host_test
+$HOSTCC -O1 -Wall -DHOST_TEST=1 -DBOARD_HEADER=\"boards/$BOARD.h\" -o out/host_test console.c probe.c host_test.c && ./out/host_test
 ls -l out/Image out/shim-boot.img

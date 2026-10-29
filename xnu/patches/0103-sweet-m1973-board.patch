@@ -1,0 +1,430 @@
+diff --git a/bsd/conf/Makefile.template b/bsd/conf/Makefile.template
+index 428469f..7a90cbf 100644
+--- a/bsd/conf/Makefile.template
++++ b/bsd/conf/Makefile.template
+@@ -46,7 +46,7 @@ SFLAGS+= -include meta_features.h
+ 
+ # This provider is built into SWEET (and its second board, GUACAMOLE);
+ # other boards use their normal kext.
+-ifneq ($(filter SWEET GUACAMOLE,$(CURRENT_MACHINE_CONFIG)),)
++ifneq ($(filter SWEET GUACAMOLE M1973,$(CURRENT_MACHINE_CONFIG)),)
+ SWEET_PTHREAD_ROOT = $(SRCROOT)/bsd/pthread/sweet_libpthread
+ SWEET_PTHREAD_INC = -I$(SWEET_PTHREAD_ROOT) -I$(SWEET_PTHREAD_ROOT)/private -I$(SWEET_PTHREAD_ROOT)/include
+ sweet_pthread_init.o_INCFLAGS = $(SWEET_PTHREAD_INC)
+diff --git a/config/MASTER.arm64.m1973 b/config/MASTER.arm64.m1973
+new file mode 100644
+index 0000000..911053c
+--- /dev/null
++++ b/config/MASTER.arm64.m1973
+@@ -0,0 +1,115 @@
++#
++# m1973 (Meizu 16s Pro, SM8150 / SD855+): the sweet port on a third board.
++# Same options as MASTER.arm64.sweet; the open-source arm64 assembly and
++# pmap come from the same place (nos_arm_asm, nos_arm_pmap). Per-device
++# addresses live in pexpert/pexpert/arm64/sweet_dev.h (kernel) and
++# tools/devices.py (ADT/shim); shim/boards/guacamole.h mirrors them.
++#
++#
++# Mach Operating System
++# Copyright (c) 1986 Carnegie-Mellon University
++# Copyright 2001-2018 Apple Inc.
++#
++# All rights reserved.  The CMU software License Agreement
++# specifies the terms and conditions for use and redistribution.
++#  
++######################################################################
++#
++#  Master Apple configuration file (see the master machine independent
++#  configuration file for a description of the file format).
++#
++######################################################################
++#  
++#  Standard Apple OS Configurations:
++#  -------- ----- -- ---------------
++#
++#  KERNEL_BASE =    [ arm64 config_pmap_ppl medium msgb_large config_requires_u32_munging config_delay_idle_sleep config_proc_udata_storage config_uexc config_darkboot nos_arm_asm nos_arm_pmap ]
++#  KERNEL_RELEASE = [ KERNEL_BASE ]
++#  KERNEL_DEV =     [ KERNEL_BASE development mach_assert config_xnupost proc_ref_debug config_proc_resource_limits ]
++#  KERNEL_DEBUG =   [ KERNEL_BASE debug mach_assert config_xnupost config_waitq_stats config_workloop_debug config_proc_resource_limits ]
++#  BSD_BASE =       [ mach_bsd sysv_sem sysv_msg sysv_shm config_netboot config_imageboot psynch config_proc_uuid_policy config_coredump pgo config_personas ]
++#  BSD_RELEASE =    [ BSD_BASE ]
++#  BSD_DEV =        [ BSD_BASE config_vnguard ]
++#  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
++#  FILESYS_BASE =   [ devfs fdesc fifo mockfs sweet_hfs fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_searchfs config_volfs config_appledouble nullfs bindfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
++#  FILESYS_RELEASE= [ FILESYS_BASE ]
++#  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
++#  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
++#  NFS =            [ nfsserver ]
++#  SKYWALK_BASE =   [ skywalk config_nexus_user_pipe config_nexus_kernel_pipe config_nexus_monitor config_nexus_flowswitch config_nexus_netif ]
++#  SKYWALK_RELEASE = [ SKYWALK_BASE ]
++#  SKYWALK_DEV =    [ SKYWALK_BASE ]
++#  SKYWALK_DEBUG =  [ SKYWALK_BASE ]
++#  NETWORKING =     [ inet bpfilter dummynet traffic_mgt sendfile ah_all_crypto bond vlan gif stf ifnet_input_chk config_mbuf_jumbo if_bridge MULTIPATH if_fake remote_vif ]
++#  NETWORKING_RELEASE = [ NETWORKING ]
++#  NETWORKING_DEV = [ NETWORKING_RELEASE packet_mangler if_headless ]
++#  NETWORKING_DEBUG = [ NETWORKING_DEV ]
++#  VPN =            [ ipsec flow_divert necp content_filter ]
++#  PF =             [ pf pflog ]
++#  MULTIPATH =      [ multipath mptcp ]
++#if SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED
++#  HIBERNATION =    [ ]
++#else /*!(SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED)*/
++#  HIBERNATION =    [ ]
++#endif /*SOC_CONFIG_t8020 || SOC_IS_VIRTUALIZED*/
++#  IOKIT_BASE =     [ iokit iokitcpp no_kernel_hid config_sleep iokitstats HIBERNATION ]
++#  IOKIT_RELEASE =  [ IOKIT_BASE ]
++#  IOKIT_DEV =      [ IOKIT_BASE iotracking ]
++#  IOKIT_DEBUG =    [ IOKIT_BASE iotracking ]
++#  LIBKERN_BASE =   [ libkerncpp config_blocks config_kec_fips crypto_sha2 config_img4 ]
++#  LIBKERN_RELEASE =[ LIBKERN_BASE zlib ]
++#  LIBKERN_DEV =    [ LIBKERN_BASE zlib iotracking ]
++#  LIBKERN_DEBUG =  [ LIBKERN_BASE zlib iotracking ]
++#  PERF_DBG_BASE =  [ config_dtrace mach_kdp config_serial_kdp kdp_interactive_debugging config_kdp_coredump_encryption config_pervasive_energy PERFMON_BASE kperf kpc ]
++#  PERF_DBG_RELEASE=[ PERF_DBG_BASE ist_kdebug ]
++#  PERF_DBG_DEV =   [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
++#  PERF_DBG_DEBUG = [ PERF_DBG_BASE lock_stats zleaks alternate_debugger sched_hygiene_debug config_debug_syscall_rejection config_iotrace ]
++#if SOC_IS_VIRTUALIZED
++#  PARAVIRT_BASE =  [ config_pv_ticket ]
++#else
++#  PARAVIRT_BASE =  [ ]
++#endif /*SOC_IS_VIRTUALIZED*/
++#  MACH_BASE =      [ mach config_ecc_logging vc_progress_white importance_inheritance config_atm config_coalitions config_iosched config_sysdiagnose config_telemetry config_mach_bridge_recv_time config_quiesce_counter config_arm_pfz config_user_notification phys_write_acct config_service_port_info config_voucher_deprecated PARAVIRT_BASE config_ledger_interval_max ]
++#  MACH_RELEASE =   [ MACH_BASE ]
++#  MACH_DEV =       [ MACH_BASE config_io_accounting importance_trace ]
++#  MACH_DEBUG =     [ MACH_BASE config_io_accounting importance_trace importance_debug ]
++#  SCHED_BASE =     [ config_sched_traditional config_sched_multiq config_sched_deferred_ast config_clutch config_sched_sfi config_sched_auto_join config_preadopt_tg ]
++#  SCHED_RELEASE =  [ SCHED_BASE ]
++#  SCHED_DEV =      [ SCHED_BASE ]
++#  SCHED_DEBUG =    [ SCHED_BASE config_sched_grrr config_sched_proto ]
++#  VM_BASE =        [ vm_pressure_events memorystatus config_code_decryption encrypted_swap config_deferred_reclaim ]
++#  VM_RELEASE =     [ VM_BASE ]
++#  VM_DEV =         [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_DEBUG =       [ VM_BASE dynamic_codesigning pgzalloc ]
++#  VM_KASAN =       [ VM_BASE dynamic_codesigning config_kasan config_ubsan config_kcov config_ksancov kernel_tbi ]
++#  SECURITY =       [ config_macf config_audit kernel_integrity config_csr config_csr_from_dt config_setuid config_kas_info config_secure_bsd_root config_arcade config_supplemental_signatures second_static_trust_cache reslide_shared_cache ]
++#  BASE =           [ PF VPN SECURITY NFS ]
++#  RELEASE =        [ BASE KERNEL_RELEASE BSD_RELEASE FILESYS_RELEASE SKYWALK_RELEASE NETWORKING_RELEASE IOKIT_RELEASE LIBKERN_RELEASE    PERF_DBG_RELEASE MACH_RELEASE SCHED_RELEASE VM_RELEASE ]
++#  DEVELOPMENT =    [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_DEV     ]
++#  DEBUG =          [ BASE KERNEL_DEBUG   BSD_DEBUG   FILESYS_DEBUG   SKYWALK_DEBUG   NETWORKING_DEBUG   IOKIT_DEBUG   LIBKERN_DEBUG      PERF_DBG_DEBUG   MACH_DEBUG   SCHED_DEBUG   VM_DEBUG   ]
++#  KASAN =          [ BASE KERNEL_DEV     BSD_DEV     FILESYS_DEV     SKYWALK_DEV     NETWORKING_DEV     IOKIT_DEV     LIBKERN_DEV        PERF_DBG_DEV     MACH_DEV     SCHED_DEV     VM_KASAN   ]
++#
++######################################################################
++#
++machine		"arm64"						# <arm64>
++
++makeoptions	OSFMK_MACHINE = "arm64"				# <mach>
++
++options		COUNT_SYSCALLS		# count bsd system calls 	# <countcalls>
++options     TRASH_VFP_ON_SAVE   # <debug,trash_vfp>
++options		ALTERNATE_DEBUGGER	# <alternate_debugger>
++
++options   CONFIG_VNODES=1024		# <xsmall>
++
++options   CONFIG_FREEZE_SUSPENDED_MIN=4		# <xsmall>
++
++options	  CONFIG_MACH_APPROXIMATE_TIME
++
++options   CONFIG_KERNEL_INTEGRITY		# <kernel_integrity>
++
++options CONFIG_MACF_LAZY_VNODE_LABELS   # Turn on labels, don't preallocate
++
++options CONFIG_HYPERVISOR_PUBLIC   # unrestricted entitlement for hypervisor
++
++options   CONFIG_RESLIDE_SHARED_CACHE		# <reslide_shared_cache>
++options   CONFIG_KERNEL_TBI		# <kernel_tbi>
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+index bc93771..26218a3 100644
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -48,6 +48,19 @@ const char * gIOKernelConfigTables =
+     "     'IONameMatch'     = 'qcom,kryo485';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
++#elif defined(ARM64_BOARD_CONFIG_M1973)
++    "   {"
++    "     'IOClass'         = SweetPlatformExpert;"
++    "     'IOProviderClass' = IOPlatformExpertDevice;"
++    "     'IONameMatch'     = 'meizu,m1973';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
++    "   {"
++    "     'IOClass'         = SweetCPU;"
++    "     'IOProviderClass' = IOPlatformDevice;"
++    "     'IONameMatch'     = 'qcom,kryo485';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
+ #else /* SWEET board */
+     "   {"
+     "     'IOClass'         = SweetPlatformExpert;"
+@@ -61,7 +74,7 @@ const char * gIOKernelConfigTables =
+     "     'IONameMatch'     = 'qcom,kryo470';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
+-#endif /* ARM64_BOARD_CONFIG_GUACAMOLE */
++#endif /* GUACAMOLE / M1973 */
+     "   {"
+     "     'IOClass'         = AppleKeyStore;"
+     "     'IOProviderClass' = IOResources;"
+diff --git a/libkern/conf/Makefile.template b/libkern/conf/Makefile.template
+index f20b12d..5845528 100644
+--- a/libkern/conf/Makefile.template
++++ b/libkern/conf/Makefile.template
+@@ -20,7 +20,7 @@ CFLAGS+= -include meta_features.h -DLIBKERN_KERNEL_PRIVATE -DOSALLOCDEBUG=1
+ SFLAGS+= -include meta_features.h
+ 
+ # The portable crypto provider is built into SWEET and GUACAMOLE.
+-ifneq ($(filter SWEET GUACAMOLE,$(CURRENT_MACHINE_CONFIG)),)
++ifneq ($(filter SWEET GUACAMOLE M1973,$(CURRENT_MACHINE_CONFIG)),)
+ SWEET_AES_ROOT = $(SRCROOT)/libkern/crypto/sweet_bearssl
+ SWEET_AES_INC = -I$(SWEET_AES_ROOT)/inc -I$(SWEET_AES_ROOT)/src
+ sweet_aes.o_INCFLAGS = $(SWEET_AES_INC)
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index 461262f..438c56b 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -29,7 +29,7 @@ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else ifneq ($(findstring _host,$(RC_ProjectName)),)
+ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else
+-SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE SWEET GUACAMOLE
++SUPPORTED_ARM64_MACHINE_CONFIGS = BCM2837 T6000 T8101 T8103 VMAPPLE SWEET GUACAMOLE M1973
+ 
+ endif
+ 
+@@ -66,6 +66,7 @@ MACHINE_FLAGS_ARM64_SWEET = -DARM64_BOARD_CONFIG_SWEET                -march=arm
+ # ARM64_BOARD_CONFIG_SWEET; a GUACAMOLE build defines it as well and reads
+ # its per-board numbers from pexpert/pexpert/arm64/sweet_dev.h.
+ MACHINE_FLAGS_ARM64_GUACAMOLE = -DARM64_BOARD_CONFIG_GUACAMOLE -DARM64_BOARD_CONFIG_SWEET -march=armv8.2-a+crypto
++MACHINE_FLAGS_ARM64_M1973 = -DARM64_BOARD_CONFIG_M1973 -DARM64_BOARD_CONFIG_SWEET -march=armv8.2-a+crypto
+ 
+ 
+ #
+@@ -266,7 +267,7 @@ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := $(shell echo $(CURRENT_ARCH_CON
+ ifneq ($(filter arm64,$(ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG)),)
+ # sweet's Cortex-A76/A55 have no pointer authentication: stay plain arm64
+ # (empty filter = the config is neither SWEET nor GUACAMOLE -> arm64e)
+-ifeq ($(filter SWEET GUACAMOLE,$(CURRENT_MACHINE_CONFIG)),)
++ifeq ($(filter SWEET GUACAMOLE M1973,$(CURRENT_MACHINE_CONFIG)),)
+ export ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG := arm64e
+ endif
+ endif
+diff --git a/pexpert/pexpert/arm64/M1973.h b/pexpert/pexpert/arm64/M1973.h
+new file mode 100644
+index 0000000..ed40068
+--- /dev/null
++++ b/pexpert/pexpert/arm64/M1973.h
+@@ -0,0 +1,83 @@
++/*
++ * Board config for the Meizu 16s Pro ("m1973", Qualcomm SM8150 /
++ * Snapdragon 855+): Kryo 485 = 4x Cortex-A55 + 4x Cortex-A76, ARMv8.2,
++ * no PAC. Identical SoC class to guacamole; per-device addresses live in
++ * pexpert/pexpert/arm64/sweet_dev.h. Same platform class as sweet (SM7150): generic ARM, 16K pages,
++ * GICv3 with two security states (every interrupt, including the timer,
++ * is a Group 1 IRQ taken through sleh_irq()).
++ *
++ * Per-device addresses (framebuffer, SPMI, RPMh, USB) live in
++ * pexpert/pexpert/arm64/sweet_dev.h, not here.
++ */
++
++#ifndef _PEXPERT_ARM64_M1973_H
++#define _PEXPERT_ARM64_M1973_H
++
++#define NO_MONITOR                1
++#define NO_ECORE                  1
++
++#define SWEET                     1
++
++/*
++ * All eight cores (four A55 + four A76, Kryo 485) as one homogeneous SMP
++ * cluster: cpus=N is clamped here. PSCI CPU_ON, 64-byte lines; the
++ * scheduler does not know the A76s are faster (no AMP/P-E clusters yet).
++ */
++#define SWEET_SMP_MAX_CPUS         8
++
++#define ARM_ARCH_TIMER
++#define __ARM_ARCH__              8
++#define __ARM_VMSA__              8
++#define __ARM_VFP__               4
++#define __ARM_COHERENT_CACHE__    1
++#define __ARM_DEBUG__             7
++#define __ARM_ENABLE_SWAP__       1
++#define __ARM_V8_CRYPTO_EXTENSIONS__ 1
++#define __ARM_PAN_AVAILABLE__     1
++#define __ARM_16K_PG__            1
++
++#define HAS_GIC_V3                1
++
++#ifndef ASSEMBLER
++#define PLATFORM_PANIC_LOG_DISABLED
++#endif /* ! ASSEMBLER */
++
++/*
++ * Qualcomm PPI numbering (secure phys, phys, virt, hyp = 1/2/3/0) instead
++ * of the usual 13/14/11/10: the virtual timer XNU uses (CNTV) is 16+3.
++ * Must match the virtual-timer-intid the ADT publishes for /gic.
++ */
++#define SWEET_VTIMER_INTID        19
++#define SWEET_IPI_SGI             1       // SGI used for cross-CPU signals
++
++#define GIC_SPURIOUS_IRQ          1023    // IRQ no. for GIC spurious interrupt
++
++#define GICR_PE_SIZE              0x20000 // Size of each redistributor region
++
++/* GICv3 register definitions; see GICv3 spec (Arm IHI 0069G) */
++#define GICD_CTLR                 0x0
++
++/* Non-secure view of GICD_CTLR (DS=0) */
++#define GICD_CTLR_ENABLEGRP1      0x1
++#define GICD_CTLR_ENABLEGRP1A     0x2
++#define GICD_CTLR_ARE_NS          0x10
++#define GICD_CTLR_RWP             0x80000000
++
++#define GICR_TYPER                              0x08
++#define GICR_WAKER                              0x14
++#define GICR_IGROUPR0                           0x10080
++#define GICR_ISENABLER0                         0x10100
++#define GICR_IPRIORITYR0                        0x10400
++
++#define GICR_TYPER_AFFINITY_VALUE_SHIFT         32
++#define GICR_TYPER_LAST                         0x10
++
++#define GICR_WAKER_PROCESSORSLEEP               0x2
++#define GICR_WAKER_CHILDRENASLEEP               0x4
++
++#define ICC_CTLR_EOIMODE                        0x2
++
++#define ICC_SRE_SRE                             0x1
++/* End of GICv3 register definitions */
++
++#endif /* ! _PEXPERT_ARM64_M1973_H */
+diff --git a/pexpert/pexpert/arm64/Makefile b/pexpert/pexpert/arm64/Makefile
+index 1d300e1..b873784 100644
+--- a/pexpert/pexpert/arm64/Makefile
++++ b/pexpert/pexpert/arm64/Makefile
+@@ -20,6 +20,7 @@ PRIVATE_KERNELFILES = \
+ 	BCM2837.h \
+ 	SWEET.h \
+ 	GUACAMOLE.h \
++	M1973.h \
+ 	sweet_dev.h
+ 
+ 
+diff --git a/pexpert/pexpert/arm64/board_config.h b/pexpert/pexpert/arm64/board_config.h
+index 121d6c5..24ef11e 100644
+--- a/pexpert/pexpert/arm64/board_config.h
++++ b/pexpert/pexpert/arm64/board_config.h
+@@ -119,7 +119,18 @@
+ 
+ #endif  /* ARM64_BOARD_CONFIG_GUACAMOLE */
+ 
+-#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_GUACAMOLE)
++#ifdef ARM64_BOARD_CONFIG_M1973
++#include <pexpert/arm64/M1973.h>
++
++#define MAX_L2_CLINE                   6
++#define MAX_CPUS                       8
++#define MAX_CPU_CLUSTERS               1
++
++#define CORE_NCTRS                     8 /* Placeholder; KPC is not enabled for this target */
++
++#endif  /* ARM64_BOARD_CONFIG_M1973 */
++
++#if defined(ARM64_BOARD_CONFIG_SWEET) || defined(ARM64_BOARD_CONFIG_GUACAMOLE) || defined(ARM64_BOARD_CONFIG_M1973)
+ #include <pexpert/arm64/sweet_dev.h>
+ #endif
+ 
+diff --git a/pexpert/pexpert/arm64/sweet_dev.h b/pexpert/pexpert/arm64/sweet_dev.h
+index 0b7870b..f588e29 100644
+--- a/pexpert/pexpert/arm64/sweet_dev.h
++++ b/pexpert/pexpert/arm64/sweet_dev.h
+@@ -119,7 +119,89 @@
+ #define SWEET_DEV_PANEL_MM_W    76
+ #define SWEET_DEV_PANEL_MM_H    163
+ 
+-#else /* !ARM64_BOARD_CONFIG_GUACAMOLE -> sweet */
++#elif defined(ARM64_BOARD_CONFIG_M1973)
++
++/* ------------- Meizu 16s Pro (m1973, SM8150 / SD855+) ------------- */
++
++#define SWEET_DEV_NAME          "m1973"
++
++/* ABL continuous-splash framebuffer: stock-DTS reserved-memory
++ * cont_splash_region@9c000000 + 0x2400000 (36 MiB), exact. Panel: Samsung
++ * SOFEF00M AMOLED, 1080x2232 (FHD+), DSI cmd mode, 4 lanes (stock dtbo
++ * dsi_sofef00m_amoled_cmd: hfp/hbp 66/66, hsync 20, vfp/vbp 8/12). */
++#define SWEET_DEV_FB_PA         0x9c000000UL
++#define SWEET_DEV_FB_W          1080
++#define SWEET_DEV_FB_H          2232
++#define SWEET_DEV_FB_STRIDE     (SWEET_DEV_FB_W * 4)
++
++/* SPMI arbiter v5 at 0xc440000 (stock DTS qcom,spmi@c440000, same reg
++ * layout as guacamole). PMIC SIDs: PM8150 = 0 (PON, keys, pinctrl@c000),
++ * PM8150B = 2 (charger), PM8150L = 4; no PM8009 on this board. */
++#define SWEET_DEV_SPMI_CORE_PA  0x0c440000u
++#define SWEET_DEV_SPMI_OBS_PA   0x0e600000u
++#define SWEET_DEV_SPMI_CFG_PA   0x0c40a000u
++#define SWEET_DEV_PON_RT        0x0810u
++
++/* Keys: stock dtbo gpio_keys puts volume-up on PM8150 (SID 0) GPIO6,
++ * active-low, same pin as guacamole; volume-down is PON RESIN (the dtbo
++ * pon node exposes the "resin" interrupt), like the sweet board. */
++#define SWEET_DEV_KEYS_VOLUME   1
++#define SWEET_DEV_VOL_GPIO_RT   0xc510u         /* volume up: PM8150 GPIO6 */
++#define SWEET_DEV_VOL_GPIO_SID  0               /* PM8150 */
++#define SWEET_DEV_VOL_DOWN_PON  1               /* volume-down is PON RESIN */
++
++/* RPMh: apps RSC at 0x18220000, TCS at 0x18220d00, command DB at
++ * 0xc3f0000c (stock DTS qcom,cmd-db@c3f000c) - same as guacamole. */
++#define SWEET_DEV_RPMH_RSC_PA   0x18220000u
++#define SWEET_DEV_RPMH_TCS_PA   0x18220d00u
++#define SWEET_DEV_RPMH_TCS_SIZE 0x3000u
++#define SWEET_DEV_RPMH_DICT_PA  0x0c3f000cu
++
++/* Touch: Goodix GT9886 @0x5d on qupv3 SE17 I2C (i2c@0xc80000, same SE as
++ * guacamole's touch), IRQ tlmm 122, vtouch pm8150_l17 ("ldoa17"). The
++ * Samsung transport does not apply; no Goodix transport yet. */
++#define SWEET_DEV_TOUCH         0
++#define SWEET_DEV_TOUCH_SEC     0
++#define SWEET_DEV_TOUCH_VREG_NAME "ldoa17"
++#define SWEET_DEV_TOUCH_VREG_MV 3008
++#define SWEET_DEV_TOUCH_SE_PA   0x00c80000u
++#define SWEET_DEV_TOUCH_GCC_PA  0x00100000u
++#define SWEET_DEV_TOUCH_NORTH_PA 0x03000000u   /* stock DTS pinctrl@03000000 */
++#define SWEET_DEV_TOUCH_GCC_VOTE 0x52014u      /* VERIFY: qupv3 wrap2 CBCR */
++#define SWEET_DEV_TOUCH_RCG     0x1e148u       /* VERIFY: qupv3 wrap2 s0 src */
++
++/* Reset-surviving scratch for the USB gadget progress marker. VERIFY:
++ * assumes the SM8150 upper bank at 0x180000000 as on guacamole; the
++ * shim probe report prints /memory before anything reads this. */
++#define SWEET_DEV_MARK_PA       0x198000000UL
++
++/* SM8150 DWC3 quirks, same as guacamole. */
++#define SWEET_DEV_USB_ARM_ON_EVENT 1
++#define SWEET_DEV_USB_VBUS_DEFAULT 3
++
++/* USB: usb0 = ssusb@a600000 + dwc3@a600000 + hsphy@88e2000 +
++ * ssphy@88e8000, same SoC wiring as guacamole (stock DTS). GCC offsets
++ * from mainline gcc-sm8150.c. */
++#define SWEET_DEV_USB           1
++#define SWEET_DEV_USB_GCC_PA    0x00100000u
++#define SWEET_DEV_USB_DWC3_PA   0x0a600000u
++#define SWEET_DEV_USB_QUSB2_PA  0x088e2000u
++#define SWEET_DEV_USB_QSCRATCH_PA 0x0a6f8800u
++#define SWEET_DEV_USB_GDSCR     0x0f004u
++#define SWEET_DEV_USB_CBCR_MASTER 0x0f010u
++#define SWEET_DEV_USB_CBCR_SLEEP  0x0f014u
++#define SWEET_DEV_USB_CBCR_UTMI   0x0f018u
++#define SWEET_DEV_USB_CBCR_CFGNOC 0x0f078u
++#define SWEET_DEV_USB_CBCR_AGGRE  0x0f07cu
++#define SWEET_DEV_USB_CBCR_AUX    0x0f050u
++#define SWEET_DEV_USB_CBCR_AUX_NAME "phy-aux"
++#define SWEET_DEV_USB_CBCR_CLKREF 0x8c008u
++
++/* Panel physical size in mm (digitizer reporting): 6.2" 19.5:9. */
++#define SWEET_DEV_PANEL_MM_W    71
++#define SWEET_DEV_PANEL_MM_H    147
++
++#else /* !ARM64_BOARD_CONFIG_GUACAMOLE && !M1973 -> sweet */
+ 
+ /* ------------- Redmi Note 10 Pro (sweet, SM7150) ------------- */
+ 

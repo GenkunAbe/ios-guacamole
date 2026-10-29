@@ -100,6 +100,46 @@ DEVICES = {
         'memory_frequency': 2133000000,
         'bus_frequency': 100000000,
     },
+    'm1973': {
+        # Meizu 16s Pro (m1973, SM8150 / SD855+). Board facts from the phone's
+        # own stock trees: the FDT inside Flyme 8.1.5.3A update.zip boot.img
+        # (model "Qualcomm SM8150 v2 SoC") and its dtbo overlays (root model
+        # "M1973(MTP),meizu,board-id = <2 3>"). No live-FDT audit yet: entries
+        # marked verify follow guacamole's audited SM8150 values until the
+        # shim probe report prints the live /memory (see M1973.md).
+        'name': 'Meizu 16s Pro (m1973, SM8150)',
+        'board_compat': 'meizu,m1973',
+        'soc_compat': 'qcom,sm8150',
+        # SM8150 DDR: assume the same three-bank layout as guacamole; the
+        # mid bank (3 GiB) is carve-out free, --highmem the upper bank.
+        'phys_base': 0xc0000000,          # verify on the probe report
+        'mem_size': 0xc0000000,
+        'high_phys_base': 0x180000000,    # verify
+        'high_mem_size': 0x100000000,
+        'gicd': 0x17a00000,               # stock DTB arm,gic-v3 regs
+        'gicd_size': 0x10000,
+        'gicr': 0x17a60000,
+        'gicr_size': 0x100000,
+        'timebase': 19200000,
+        'vtimer_intid': 19,
+        # reserved-memory cont_splash_region@9c000000 + 0x2400000 (36 MiB),
+        # exact from the stock DTB. Panel: Samsung SOFEF00M AMOLED, 1080x2232
+        # DSI cmd mode, 4 lanes (dtbo dsi_sofef00m_amoled_cmd).
+        'fb': 0x9c000000,
+        'fb_size': 0x2400000,
+        'fb_w': 1080,
+        'fb_h': 2232,
+        'fb_stride': 1080 * 4,
+        'ufs': 0x01d84000,                # stock DTB ufshc@1d84000, 2 lanes
+        'ufs_size': 0x3000,
+        # Kryo 485 (SD855+): same cores/MPIDRs as guacamole.
+        'cpu_compat': 'qcom,kryo485',
+        'cpus': 8,
+        'cpu_regs': [0, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700],
+        'cpu_clocks': [1785600000] * 4 + [2419200000] * 3 + [2841600000],  # verify
+        'memory_frequency': 2133000000,
+        'bus_frequency': 100000000,
+    },
 }
 
 

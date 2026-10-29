@@ -23,6 +23,24 @@ import devices  # noqa: E402
 # Per-board driver constants that only live in the kernel/shim headers; keep
 # in sync with pexpert/pexpert/arm64/sweet_dev.h and shim/boards/<board>.h.
 MIRROR = {
+    'm1973': {
+        # Meizu 16s Pro (SM8150 / SD855+): stock-DT facts, SoC blocks shared
+        # with guacamole (see M1973.md).
+        'SPMI core': 0x0c440000,
+        'SPMI observer': 0x0e600000,
+        'SPMI config': 0x0c40a000,
+        'USB GCC': 0x00100000,
+        'USB DWC3': 0x0a600000,
+        'USB HS PHY': 0x088e2000,
+        'USB QMP PHY': 0x088e8000,
+        'RCG/SE17': 0x00c80000,
+        'TLMM': 0x03000000,
+        'PSHOLD': 0x0c264000,
+        'IMEM': 0x146bf000,
+        'RPMh RSC': 0x18220000,
+        'RPMh TCS': 0x18220d00,
+        'RPMh cmd DB': 0x0c3f000c,
+    },
     'guacamole': {
         'SPMI core': 0x0c440000,
         'SPMI observer': 0x0e600000,

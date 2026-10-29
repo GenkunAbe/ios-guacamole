@@ -137,12 +137,11 @@ void exc_handler(uint64_t slot, uint64_t *regs)
 		return;
 	}
 	con_clear(BLUE);
-	switch (slot & 3) {
-	case 0: con_str("PANIC", "SYNC"); break;
-	case 1: con_str("PANIC", "IRQ"); break;
-	case 2: con_str("PANIC", "FIQ"); break;
-	default: con_str("PANIC", "SERROR"); break;
-	}
+	/* 2D char array (not a pointer table): clang turns a switch over
+	 * string literals into an ABS64 .rodata pointer table, which the
+	 * no-relocation image forbids (see probe.c's interest_labels). */
+	static const char kind[][8] = { "SYNC", "IRQ", "FIQ", "SERROR" };
+	con_str("PANIC", kind[slot & 3]);
 	con_hex2("SLOT", "n=", slot, "cpu=", rsr("mpidr_el1"));
 	con_str("STAGE", stage);
 	con_hex("ESR", rsr("esr_el1"));
